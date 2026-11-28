@@ -107,6 +107,115 @@ pub fn sidebar_order(threads: &[Thread], query: &OrderQuery<'_>) -> Vec<Thread> 
         .collect()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidebarAppGroup {
+    Workspace,
+    ToolsAndAgents,
+}
+
+#[derive(Clone, Copy)]
+struct SidebarAppSpec {
+    slot: usize,
+    group: SidebarAppGroup,
+    label: &'static str,
+    icon: &'static str,
+    test_id: &'static str,
+}
+
+impl SidebarAppSpec {
+    fn view(self) -> AppView {
+        match self.slot {
+            0 => AppView::Today,
+            1 => AppView::Inbox,
+            2 => AppView::Tasks,
+            3 => AppView::Calendar,
+            4 => AppView::Meetings,
+            5 => AppView::Knowledge,
+            6 => AppView::People,
+            7 => AppView::Terminal,
+            8 => AppView::Workbench,
+            _ => AppView::Automations,
+        }
+    }
+
+    fn is_automations(self) -> bool {
+        self.slot == 9
+    }
+}
+
+const SIDEBAR_APP_SPECS: [SidebarAppSpec; 10] = [
+    SidebarAppSpec {
+        slot: 0,
+        group: SidebarAppGroup::Workspace,
+        label: "Today",
+        icon: "sun",
+        test_id: "sidebar-nav-today",
+    },
+    SidebarAppSpec {
+        slot: 1,
+        group: SidebarAppGroup::Workspace,
+        label: "Inbox",
+        icon: "inbox",
+        test_id: "sidebar-nav-inbox",
+    },
+    SidebarAppSpec {
+        slot: 2,
+        group: SidebarAppGroup::Workspace,
+        label: "Tasks",
+        icon: "list-checks",
+        test_id: "sidebar-nav-tasks",
+    },
+    SidebarAppSpec {
+        slot: 3,
+        group: SidebarAppGroup::Workspace,
+        label: "Calendar",
+        icon: "calendar",
+        test_id: "sidebar-nav-calendar",
+    },
+    SidebarAppSpec {
+        slot: 4,
+        group: SidebarAppGroup::Workspace,
+        label: "Meetings",
+        icon: "mic",
+        test_id: "sidebar-nav-meetings",
+    },
+    SidebarAppSpec {
+        slot: 5,
+        group: SidebarAppGroup::Workspace,
+        label: "Knowledge",
+        icon: "book-open",
+        test_id: "sidebar-nav-knowledge",
+    },
+    SidebarAppSpec {
+        slot: 6,
+        group: SidebarAppGroup::Workspace,
+        label: "People",
+        icon: "users",
+        test_id: "sidebar-nav-people",
+    },
+    SidebarAppSpec {
+        slot: 7,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Terminal",
+        icon: "terminal",
+        test_id: "sidebar-nav-terminal",
+    },
+    SidebarAppSpec {
+        slot: 8,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Workbench",
+        icon: "wrench",
+        test_id: "sidebar-nav-workbench",
+    },
+    SidebarAppSpec {
+        slot: 9,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Agent workflows",
+        icon: "bot",
+        test_id: "sidebar-nav-agent-workflows",
+    },
+];
+
 #[derive(PartialEq)]
 struct Shelves {
     pinned: Vec<Thread>,
@@ -239,7 +348,7 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
 
-    // Footer view switcher (icon row).
+    // Footer utility button (Settings).
     let nav_icon = move |view: AppView, icon: &'static str, label: &'static str| {
         let on_view = view.clone();
         let is_on = Signal::derive(move || active_view.get() == on_view);
@@ -250,7 +359,7 @@ pub fn Sidebar() -> impl IntoView {
                 title=label
                 aria-pressed=move || is_on.get().to_string()
                 class=move || format!(
-                    "inline-flex size-control items-center justify-center rounded-grape transition-colors {}",
+                    "inline-flex size-control shrink-0 items-center justify-center rounded-grape transition-colors cursor-pointer {}",
                     if is_on.get() {
                         "bg-longan-800/60 text-rambutan-100"
                     } else {
@@ -267,45 +376,15 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
 
-    // Agent workflows carries the unread count of agent updates.
+    // Unread agent updates count: surfaces on the collapsed Apps trigger and
+    // inside the Agent workflows row when the Apps popover is open.
     let agent_updates = use_context::<crate::agent_updates::AgentUpdates>();
-    let agent_workflows_nav = move || {
-        let unread =
-            Signal::derive(move || agent_updates.map_or(0, |updates| updates.unread.get()));
-        let is_on = Signal::derive(move || active_view.get() == AppView::Automations);
-        let label =
-            Signal::derive(move || crate::agent_updates::AgentUpdates::nav_label(unread.get()));
-        view! {
-            <button
-                type="button"
-                aria-label=move || label.get()
-                title=move || label.get()
-                aria-pressed=move || is_on.get().to_string()
-                class=move || format!(
-                    "relative inline-flex size-control items-center justify-center rounded-grape transition-colors {}",
-                    if is_on.get() {
-                        "bg-longan-800/60 text-rambutan-100"
-                    } else {
-                        "text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-100"
-                    }
-                )
-                on:click=move |_| {
-                    set_active_view.set(AppView::Automations);
-                    dismiss_mobile_navigation();
-                }
-            >
-                <Icon name="bot" size=16 />
-                <Show when=move || { unread.get() > 0 }>
-                    <span
-                        aria-hidden="true"
-                        class="pointer-events-none absolute -right-0.5 -top-0.5 h-[16px] min-w-[16px] rounded-orb bg-blueberry-400 px-1 text-center text-[11px] leading-[16px] text-longan-950"
-                    >
-                        {move || if unread.get() > 99 { "99+".to_string() } else { unread.get().to_string() }}
-                    </span>
-                </Show>
-            </button>
-        }
-    };
+    let unread_agent_updates =
+        Signal::derive(move || agent_updates.map_or(0, |updates| updates.unread.get()));
+    let apps_menu_open = RwSignal::new(false);
+    let apps_menu_at = RwSignal::new(None::<(f64, f64)>);
+    let apps_trigger_ref = NodeRef::<leptos::html::Button>::new();
+    let apps_menu_ref = NodeRef::<leptos::html::Div>::new();
 
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let prompt_links = use_context::<crate::prompt_links::PromptLinks>();
@@ -565,6 +644,8 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
     let open_menu = move |id: String| {
+        apps_menu_open.set(false);
+        apps_menu_at.set(None);
         menu_at.set(None);
         menu_thread.set(Some(id));
         // The menu mounts before the next frame. Place it and focus its
@@ -573,6 +654,82 @@ pub fn Sidebar() -> impl IntoView {
             place_menu();
             if let Some(first) = menu_items().first() {
                 let _ = first.focus();
+            }
+        });
+    };
+    let apps_menu_items = move || -> Vec<web_sys::HtmlElement> {
+        let Some(menu) = apps_menu_ref.try_get_untracked().flatten() else {
+            return Vec::new();
+        };
+        let Ok(items) = menu.query_selector_all("[role=menuitem]:not([disabled])") else {
+            return Vec::new();
+        };
+        (0..items.length())
+            .filter_map(|i| items.item(i)?.dyn_into::<web_sys::HtmlElement>().ok())
+            .collect()
+    };
+    let close_apps_menu = move |refocus: bool| {
+        if !apps_menu_open.try_get_untracked().unwrap_or(false) {
+            return;
+        }
+        apps_menu_open.set(false);
+        apps_menu_at.set(None);
+        if refocus {
+            if let Some(button) = apps_trigger_ref.try_get_untracked().flatten() {
+                let _ = button.focus();
+            }
+        }
+    };
+    let place_apps_menu = move || {
+        if !apps_menu_open.try_get_untracked().unwrap_or(false) {
+            return;
+        }
+        let Some(menu) = apps_menu_ref.try_get_untracked().flatten() else {
+            return;
+        };
+        let Some(button) = apps_trigger_ref.try_get_untracked().flatten() else {
+            close_apps_menu(false);
+            return;
+        };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let length = |value: Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>| {
+            value.ok().and_then(|value| value.as_f64()).unwrap_or(0.0)
+        };
+        let trigger = button.get_bounding_client_rect();
+        let own = menu.get_bounding_client_rect();
+        let at = menu_origin(
+            MenuRect {
+                left: trigger.left(),
+                top: trigger.top(),
+                width: trigger.width(),
+                height: trigger.height(),
+            },
+            (own.width(), own.height()),
+            (length(window.inner_width()), length(window.inner_height())),
+        );
+        if apps_menu_at.get_untracked() != Some(at) {
+            apps_menu_at.set(Some(at));
+        }
+    };
+    let toggle_apps_menu = move || {
+        if apps_menu_open.get_untracked() {
+            close_apps_menu(true);
+            return;
+        }
+        close_menu(false);
+        apps_menu_at.set(None);
+        apps_menu_open.set(true);
+        let focus_slot = SIDEBAR_APP_SPECS
+            .iter()
+            .find(|spec| active_view.get_untracked() == spec.view())
+            .map_or(0, |spec| spec.slot);
+        request_animation_frame(move || {
+            place_apps_menu();
+            let items = apps_menu_items();
+            if let Some(item) = items.get(focus_slot).or_else(|| items.first()) {
+                let _ = item.focus();
             }
         });
     };
@@ -589,6 +746,9 @@ pub fn Sidebar() -> impl IntoView {
         window_resized.track();
         if menu_thread.with(Option::is_some) {
             request_animation_frame(place_menu);
+        }
+        if apps_menu_open.get() {
+            request_animation_frame(place_apps_menu);
         }
     });
 
@@ -1683,29 +1843,247 @@ pub fn Sidebar() -> impl IntoView {
             </crate::ui::Dialog>
             // Show the update button while a provider CLI or the app is behind.
             <crate::components::updates::SidebarUpdateButton />
-            // Footer: the other surfaces as icon buttons, settings at the end.
-            // Ten views and settings would need 372px in one row of 32px
-            // buttons and the row has 232px, so they sit in rows of six spread
-            // across it; settings takes the last column.
-            <div
-                class="grid grid-cols-[repeat(6,var(--size-control))] justify-between gap-y-1 px-2 py-2"
-                role="group"
-                aria-label="Views"
-            >
-                {nav_icon(AppView::Today, "sun", "Today")}
-                {nav_icon(AppView::Inbox, "inbox", "Inbox")}
-                {nav_icon(AppView::Knowledge, "book-open", "Knowledge")}
-                {nav_icon(AppView::Tasks, "list-checks", "Tasks")}
-                {nav_icon(AppView::Terminal, "terminal", "Terminal")}
-                {nav_icon(AppView::Workbench, "wrench", "Workbench")}
-                {nav_icon(AppView::Calendar, "calendar", "Calendar")}
-                {nav_icon(AppView::Meetings, "mic", "Meetings")}
-                {nav_icon(AppView::People, "users", "People")}
-                {agent_workflows_nav()}
-                <div class="col-start-6 flex">
-                    {nav_icon(AppView::Settings, "settings", "Settings")}
-                </div>
-            </div>
+            // Single-row sidebar footer dock matching desktop: labeled `Apps`
+            // view-switcher popover on the left, Settings on the right.
+            {move || {
+                let active_app = Signal::derive(move || {
+                    let current = active_view.get();
+                    SIDEBAR_APP_SPECS
+                        .iter()
+                        .copied()
+                        .find(|spec| current == spec.view())
+                });
+                let trigger_highlighted =
+                    Signal::derive(move || apps_menu_open.get() || active_app.get().is_some());
+                let trigger_aria = Signal::derive(move || {
+                    let label = active_app.get().map_or("Apps", |spec| spec.label);
+                    let unread = unread_agent_updates.get();
+                    match unread {
+                        0 if active_app.get().is_some() => format!("{label}, switch app"),
+                        0 => label.to_string(),
+                        1 => format!("{label}, 1 unread update"),
+                        count => format!("{label}, {count} unread updates"),
+                    }
+                });
+                let apps_menu_style = move || match apps_menu_at.get() {
+                    Some((left, top)) => format!("left:{left}px;top:{top}px"),
+                    None => "left:0;top:0;opacity:0".to_string(),
+                };
+                let app_row = move |spec: SidebarAppSpec| {
+                    let is_on = Signal::derive(move || active_view.get() == spec.view());
+                    let aria_label = Signal::derive(move || {
+                        if spec.is_automations() {
+                            crate::agent_updates::AgentUpdates::nav_label(
+                                unread_agent_updates.get(),
+                            )
+                        } else {
+                            spec.label.to_string()
+                        }
+                    });
+                    view! {
+                        <button
+                            type="button"
+                            role="menuitem"
+                            tabindex="-1"
+                            data-testid=spec.test_id
+                            aria-label=move || aria_label.get()
+                            aria-current=move || is_on.get().then_some("page")
+                            class=move || format!(
+                                "flex h-[30px] w-full items-center justify-between gap-2 rounded-seed px-2 text-left text-label-sm transition-colors cursor-pointer focus-visible:outline-1 focus-visible:outline-persimmon-400 {}",
+                                if is_on.get() {
+                                    "bg-longan-800/75 text-rambutan-100 font-medium"
+                                } else {
+                                    "text-rambutan-200 hover:bg-longan-800/55"
+                                }
+                            )
+                            on:click=move |_| {
+                                close_apps_menu(false);
+                                set_active_view.set(spec.view());
+                                dismiss_mobile_navigation();
+                            }
+                        >
+                            <span class="flex min-w-0 flex-1 items-center gap-2">
+                                <Icon
+                                    name=spec.icon
+                                    size=15
+                                    class=if is_on.get_untracked() {
+                                        "text-rambutan-100"
+                                    } else {
+                                        "text-rambutan-400"
+                                    }
+                                />
+                                <span class="min-w-0 truncate">{spec.label}</span>
+                            </span>
+                            <span class="flex shrink-0 items-center gap-1.5">
+                                <Show when=move || { spec.is_automations() && unread_agent_updates.get() > 0 }>
+                                    <span
+                                        aria-hidden="true"
+                                        data-testid="sidebar-agent-workflows-badge"
+                                        class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-orb bg-blueberry-400 px-1 text-[11px] font-semibold leading-[16px] text-longan-950"
+                                    >
+                                        {move || {
+                                            let count = unread_agent_updates.get();
+                                            if count > 99 { "99+".to_string() } else { count.to_string() }
+                                        }}
+                                    </span>
+                                </Show>
+                                <Show when=move || is_on.get()>
+                                    <Icon name="check" size=13 class="text-persimmon-400" />
+                                </Show>
+                            </span>
+                        </button>
+                    }
+                };
+                view! {
+                    <div
+                        class="flex shrink-0 items-center justify-between gap-1.5 border-t border-longan-800/60 px-2 py-2"
+                        role="group"
+                        aria-label="Views"
+                        data-testid="sidebar-footer"
+                    >
+                        <div class="relative min-w-0 flex-1">
+                            <button
+                                node_ref=apps_trigger_ref
+                                type="button"
+                                data-testid="sidebar-apps-trigger"
+                                aria-haspopup="menu"
+                                aria-expanded=move || apps_menu_open.get().to_string()
+                                aria-label=move || trigger_aria.get()
+                                title=move || trigger_aria.get()
+                                class=move || format!(
+                                    "flex h-control w-full items-center justify-between gap-1.5 rounded-grape border px-2 text-label-sm font-medium transition-colors cursor-pointer focus-visible:outline-1 focus-visible:outline-persimmon-400 {}",
+                                    if trigger_highlighted.get() {
+                                        "bg-longan-800/60 border-longan-700/75 text-rambutan-100"
+                                    } else {
+                                        "bg-longan-800/35 border-longan-800/70 text-rambutan-200 hover:bg-longan-800/55 hover:border-longan-700/65 hover:text-rambutan-100"
+                                    }
+                                )
+                                on:click=move |_| toggle_apps_menu()
+                            >
+                                <span class="flex min-w-0 flex-1 items-center gap-1.5">
+                                    {move || {
+                                        let icon_name = active_app
+                                            .get()
+                                            .map_or("layout-dashboard", |spec| spec.icon);
+                                        let icon_class = if trigger_highlighted.get() {
+                                            "text-rambutan-100"
+                                        } else {
+                                            "text-rambutan-400"
+                                        };
+                                        view! { <Icon name=icon_name size=15 class=icon_class /> }
+                                    }}
+                                    <span class="min-w-0 truncate">
+                                        {move || active_app.get().map_or("Apps", |spec| spec.label)}
+                                    </span>
+                                </span>
+                                <span class="flex shrink-0 items-center gap-1">
+                                    <Show when=move || { unread_agent_updates.get() > 0 }>
+                                        <span
+                                            aria-hidden="true"
+                                            data-testid="sidebar-apps-unread-badge"
+                                            class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-orb bg-blueberry-400 px-1 text-[11px] font-semibold leading-[16px] text-longan-950"
+                                        >
+                                            {move || {
+                                                let count = unread_agent_updates.get();
+                                                if count > 99 { "99+".to_string() } else { count.to_string() }
+                                            }}
+                                        </span>
+                                    </Show>
+                                    <Icon
+                                        name="chevron-down"
+                                        size=12
+                                        class="text-rambutan-500"
+                                    />
+                                </span>
+                            </button>
+                            <Show when=move || apps_menu_open.get()>
+                                <div
+                                    class="fixed inset-0 z-40"
+                                    aria-hidden="true"
+                                    on:mousedown=|ev: web_sys::MouseEvent| ev.prevent_default()
+                                    on:click=move |_| close_apps_menu(true)
+                                ></div>
+                                <div
+                                    node_ref=apps_menu_ref
+                                    role="menu"
+                                    aria-label="Apps"
+                                    data-sidebar-apps-menu
+                                    data-testid="sidebar-apps-menu"
+                                    class="fixed z-50 flex w-[232px] flex-col gap-px rounded-lychee bg-longan-700 p-1.5 shadow-lg inset-ring inset-ring-white/15"
+                                    style=apps_menu_style
+                                    on:mousedown=|ev: web_sys::MouseEvent| ev.prevent_default()
+                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                        if ev.meta_key() || ev.ctrl_key() || ev.alt_key() {
+                                            return;
+                                        }
+                                        match ev.key().as_str() {
+                                            "Escape" => {
+                                                ev.prevent_default();
+                                                ev.stop_propagation();
+                                                close_apps_menu(true);
+                                            }
+                                            "Tab" => close_apps_menu(true),
+                                            key => {
+                                                let items = apps_menu_items();
+                                                let focused = document().active_element();
+                                                let current = items.iter().position(|item| {
+                                                    focused.as_ref()
+                                                        == Some(item.unchecked_ref::<web_sys::Element>())
+                                                });
+                                                let next = menu_step(current, items.len(), key)
+                                                    .and_then(|next| items.get(next));
+                                                if let Some(next) = next {
+                                                    ev.prevent_default();
+                                                    ev.stop_propagation();
+                                                    let _ = next.focus();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    on:focusout=move |ev: web_sys::FocusEvent| {
+                                        let Some(next) = ev
+                                            .related_target()
+                                            .and_then(|target| target.dyn_into::<web_sys::Node>().ok())
+                                        else {
+                                            return;
+                                        };
+                                        let inside = apps_menu_ref
+                                            .try_get_untracked()
+                                            .flatten()
+                                            .is_some_and(|menu| menu.contains(Some(&next)));
+                                        if !inside {
+                                            close_apps_menu(false);
+                                        }
+                                    }
+                                >
+                                    <div class="px-2 pt-1 pb-0.5 text-[10px] font-semibold tracking-wider text-rambutan-500">
+                                        "WORKSPACE"
+                                    </div>
+                                    {SIDEBAR_APP_SPECS
+                                        .iter()
+                                        .copied()
+                                        .filter(|spec| spec.group == SidebarAppGroup::Workspace)
+                                        .map(app_row)
+                                        .collect_view()}
+                                    <div role="separator" class="mx-1 my-1 h-px bg-white/10"></div>
+                                    <div class="px-2 pt-1 pb-0.5 text-[10px] font-semibold tracking-wider text-rambutan-500">
+                                        "TOOLS & AGENTS"
+                                    </div>
+                                    {SIDEBAR_APP_SPECS
+                                        .iter()
+                                        .copied()
+                                        .filter(|spec| spec.group == SidebarAppGroup::ToolsAndAgents)
+                                        .map(app_row)
+                                        .collect_view()}
+                                </div>
+                            </Show>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-0.5">
+                            {nav_icon(AppView::Settings, "settings", "Settings")}
+                        </div>
+                    </div>
+                }
+            }}
         </nav>
     }
 }
@@ -1886,5 +2264,36 @@ mod tests {
         assert!(is_settled(&forced, now, false, false, false));
         assert!(is_settled(&pinned_old, now, false, false, false));
         assert!(!is_settled(&pinned, now, false, false, false));
+    }
+
+    #[test]
+    fn sidebar_apps_popover_matches_desktop_groups() {
+        let workspace: Vec<&str> = SIDEBAR_APP_SPECS
+            .iter()
+            .filter(|spec| spec.group == SidebarAppGroup::Workspace)
+            .map(|spec| spec.label)
+            .collect();
+        let tools: Vec<&str> = SIDEBAR_APP_SPECS
+            .iter()
+            .filter(|spec| spec.group == SidebarAppGroup::ToolsAndAgents)
+            .map(|spec| spec.label)
+            .collect();
+        assert_eq!(
+            workspace,
+            [
+                "Today",
+                "Inbox",
+                "Tasks",
+                "Calendar",
+                "Meetings",
+                "Knowledge",
+                "People",
+            ]
+        );
+        assert_eq!(tools, ["Terminal", "Workbench", "Agent workflows"]);
+        for (idx, spec) in SIDEBAR_APP_SPECS.iter().enumerate() {
+            assert_eq!(spec.slot, idx);
+            assert_eq!(spec.is_automations(), spec.view() == AppView::Automations);
+        }
     }
 }

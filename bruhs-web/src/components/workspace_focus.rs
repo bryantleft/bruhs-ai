@@ -29,7 +29,7 @@ impl WorkspaceFocus {
             };
             if target.closest(BOUNDARY).ok().flatten().is_some()
                 || target
-                    .closest("[data-thread-menu]")
+                    .closest("[data-thread-menu], [data-sidebar-apps-menu]")
                     .ok()
                     .flatten()
                     .is_some()

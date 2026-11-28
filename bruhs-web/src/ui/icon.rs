@@ -274,6 +274,9 @@ fn icon_body(name: &str) -> &'static str {
             r#"<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/>"#
         }
         "bookmark" => r#"<path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/>"#,
+        "layout-dashboard" => {
+            r#"<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>"#
+        }
 
         // Fallback — a muted dot so missing names don't crash the view.
         _ => r#"<circle cx="12" cy="12" r="2"/>"#,
