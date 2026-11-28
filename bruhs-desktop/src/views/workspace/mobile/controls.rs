@@ -65,6 +65,70 @@ impl Workspace {
         true
     }
 
+    pub(in crate::views::workspace) fn sync_relay_to_server(&mut self, cx: &mut Context<'_, Self>) {
+        if cx.try_global::<crate::app_state::DesktopState>().is_none() {
+            return;
+        }
+        let config = self.access_preferences.to_relay_config();
+        let task = crate::app_state::spawn_tokio(cx, async move {
+            crate::server_client::ServerClient::workbench_client()
+                .relay_update(&config)
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(snap) => {
+                        this.mobile.held_webhooks = snap.held_webhook_count;
+                        this.mobile.relay_notice = Some(if snap.config.enabled {
+                            format!("Managed relay saved ({}).", snap.config.relay_url)
+                        } else {
+                            "Relay settings synced with local server.".into()
+                        });
+                    }
+                    Err(err) => {
+                        this.mobile.relay_notice = Some(err.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::views::workspace) fn flush_held_webhooks(&mut self, cx: &mut Context<'_, Self>) {
+        if cx.try_global::<crate::app_state::DesktopState>().is_none() {
+            return;
+        }
+        let task = crate::app_state::spawn_tokio(cx, async move {
+            crate::server_client::ServerClient::workbench_client()
+                .relay_flush_webhooks()
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(reply) => {
+                        this.mobile.held_webhooks = reply.remaining;
+                        this.mobile.relay_notice = Some(format!(
+                            "Flushed {} held webhook{} ({} expired).",
+                            reply.flushed,
+                            if reply.flushed == 1 { "" } else { "s" },
+                            reply.expired
+                        ));
+                    }
+                    Err(err) => {
+                        this.mobile.relay_notice = Some(err.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(in crate::views::workspace) fn render_access_identity_card(
         &self,
         cx: &Context<'_, Self>,
@@ -87,6 +151,58 @@ impl Workspace {
             });
             cx.notify();
         });
+        let relay_controls = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(Input::new(&self.mobile.relay_url_input).aria_label("Managed relay HTTPS URL"))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        control("access-relay-save", "Save relay", false)
+                            .debug_selector(|| "access-relay-save".into())
+                            .activate(cx, |this, _, cx| {
+                                let url = this
+                                    .mobile
+                                    .relay_url_input
+                                    .read(cx)
+                                    .value()
+                                    .trim()
+                                    .to_owned();
+                                let candidate = AccessPreferences {
+                                    relay_url: url.clone(),
+                                    ..this.access_preferences.clone()
+                                };
+                                if let Err(msg) = candidate.to_relay_config().validate() {
+                                    this.mobile.relay_notice = Some(msg.into());
+                                    cx.notify();
+                                    return;
+                                }
+                                this.access_preferences.relay_url = url;
+                                this.sync_relay_to_server(cx);
+                                this.persist_and_notify(cx);
+                            }),
+                    )
+                    .child(
+                        control(
+                            "access-relay-flush",
+                            if self.mobile.held_webhooks > 0 {
+                                format!("Flush held ({})", self.mobile.held_webhooks)
+                            } else {
+                                "Flush held webhooks".into()
+                            },
+                            false,
+                        )
+                        .debug_selector(|| "access-relay-flush".into())
+                        .activate(cx, |this, _, cx| this.flush_held_webhooks(cx)),
+                    ),
+            )
+            .when_some(self.mobile.relay_notice.clone(), |el, msg| {
+                el.child(note(msg))
+            });
         let rows = vec![
             self.settings_row(
                 "settings-access-environment-icon",
@@ -113,6 +229,7 @@ impl Workspace {
                     |this, _, cx| {
                         this.access_preferences.require_device_approval =
                             !this.access_preferences.require_device_approval;
+                        this.sync_relay_to_server(cx);
                         this.persist_and_notify(cx);
                     },
                 ),
@@ -130,9 +247,57 @@ impl Workspace {
                     |this, _, cx| {
                         this.access_preferences.hold_webhooks_while_offline =
                             !this.access_preferences.hold_webhooks_while_offline;
+                        this.sync_relay_to_server(cx);
                         this.persist_and_notify(cx);
                     },
                 ),
+            ),
+            self.settings_row(
+                "settings-access-publish-activity",
+                "Publish agent activity",
+                "Send thread updates to paired mobile clients for notifications and Live Activities.",
+                settings_ui::switch(
+                    "settings-toggle-publish-agent-activity",
+                    self.access_preferences.publish_agent_activity,
+                    false,
+                    "Publish agent activity",
+                    cx,
+                    |this, _, cx| {
+                        this.access_preferences.publish_agent_activity =
+                            !this.access_preferences.publish_agent_activity;
+                        this.sync_relay_to_server(cx);
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "settings-access-preview-tunnel",
+                "Preview tunnel",
+                "Forward loopback dev-server ports over an authenticated tunnel when opened on another device.",
+                settings_ui::switch(
+                    "settings-toggle-preview-tunnel",
+                    self.access_preferences.preview_tunnel,
+                    false,
+                    "Preview tunnel",
+                    cx,
+                    |this, _, cx| {
+                        this.access_preferences.preview_tunnel =
+                            !this.access_preferences.preview_tunnel;
+                        this.sync_relay_to_server(cx);
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "settings-access-managed-relay",
+                "Managed relay",
+                if self.access_preferences.relay_url.is_empty() {
+                    "Connect an HTTPS relay endpoint to keep webhooks held offline and reach this machine remotely."
+                        .into()
+                } else {
+                    format!("Connected relay: {}", self.access_preferences.relay_url)
+                },
+                relay_controls.into_any_element(),
             ),
             self.settings_row(
                 "settings-access-tailscale",

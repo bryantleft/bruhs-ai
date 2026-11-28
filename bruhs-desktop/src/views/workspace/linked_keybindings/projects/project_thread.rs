@@ -205,6 +205,7 @@ pub(super) struct Composer {
     sending: bool,
     acting: bool,
     sharing: bool,
+    guest_links_enabled: bool,
     models_open: bool,
     models_loading: bool,
     models: Option<bruhs_models::delivery::writer_catalog::WriterCatalog>,
@@ -273,6 +274,7 @@ impl Workspace {
         let notification_thread = thread.clone();
         let panel = cx.new(|cx| Composer::new(peer, thread, draft, self.send_shortcut, window, cx));
         panel.update(cx, |panel, _| {
+            panel.guest_links_enabled = self.labs_flags.guest_links;
             if self.environment_sharing.share_favorite_models {
                 panel.favorite_models.clone_from(&self.favorite_models);
             } else {
@@ -355,6 +357,7 @@ impl Workspace {
         let notification_thread = thread.clone();
         let panel = cx.new(|cx| Composer::new(peer, thread, None, self.send_shortcut, window, cx));
         panel.update(cx, |panel, _| {
+            panel.guest_links_enabled = self.labs_flags.guest_links;
             if self.environment_sharing.share_favorite_models {
                 panel.favorite_models.clone_from(&self.favorite_models);
             } else {
@@ -524,6 +527,7 @@ impl Workspace {
                 sending: false,
                 acting: false,
                 sharing: false,
+                guest_links_enabled: self.labs_flags.guest_links,
                 models_open: false,
                 models_loading: false,
                 models: None,
@@ -637,6 +641,16 @@ impl Workspace {
         self.terminal_panel.update(cx, |panel, cx| {
             panel.open_ssh(host, ssh_port, path.to_owned(), title, window, cx);
         });
+    }
+
+    pub(in crate::views::workspace) fn sync_linked_labs_flags(&self, cx: &mut Context<'_, Self>) {
+        if let Some(thread) = &self.linked_projects.project_thread {
+            let enabled = self.labs_flags.guest_links;
+            thread.panel.update(cx, |panel, cx| {
+                panel.guest_links_enabled = enabled;
+                cx.notify();
+            });
+        }
     }
 
     pub(in crate::views::workspace) fn sync_linked_model_favorites(
@@ -1130,6 +1144,7 @@ impl Composer {
             sending: false,
             acting: false,
             sharing: false,
+            guest_links_enabled: true,
             models_open: false,
             models_loading: false,
             models: None,
@@ -2657,7 +2672,7 @@ impl Render for Composer {
                 .as_ref()
                 .and_then(|c| c.path.rsplit(['/', '\\']).find(|part| !part.is_empty()))
         });
-        let show_share = self.can_share() && self.thread.is_some();
+        let show_share = self.guest_links_enabled && self.can_share() && self.thread.is_some();
         #[cfg(unix)]
         let tunnel_path = self
             .checkout

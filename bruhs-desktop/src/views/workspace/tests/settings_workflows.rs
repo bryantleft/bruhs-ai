@@ -3737,3 +3737,46 @@ fn t3_parity_batch2_voice_env_shared_favorites_builtin_presets_and_offline_webho
     dictation.restore_defaults();
     assert!(dictation.transcription_environment.is_none());
 }
+
+#[gpui::test]
+fn t3_parity_batch3_relay_simlock_and_guest_links_enforcement(cx: &mut gpui::TestAppContext) {
+    use super::super::SettingsSection;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, w, cx| {
+        ws.open_settings(&OpenSettings, w, cx);
+        ws.set_settings_section(SettingsSection::Access, cx);
+        ws.access_preferences.publish_agent_activity = true;
+        ws.access_preferences.preview_tunnel = false;
+        ws.access_preferences.relay_url = "https://relay.bruhs.example".into();
+        let relay = ws.access_preferences.to_relay_config();
+        assert!(relay.enabled);
+        assert!(relay.validate().is_ok());
+
+        ws.set_settings_section(SettingsSection::Labs, cx);
+        ws.labs_flags.guest_links = false;
+        ws.sync_linked_labs_flags(cx);
+
+        ws.set_settings_section(SettingsSection::Devices, cx);
+        ws.select_settings_option("settings-device-policy", "off", w, cx);
+        assert_eq!(
+            ws.device_preferences.policy.to_wire(),
+            bruhs_models::environment_parity::DeviceAccessPolicy::Off
+        );
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    let json = workspace.read_with(cx, |ws, cx| {
+        serde_json::to_vec(&ws.snapshot(cx)).expect("serialize state")
+    });
+    let restored: super::super::PersistedWorkspaceState =
+        serde_json::from_slice(&json).expect("deserialize state");
+    assert!(restored.access_preferences.publish_agent_activity);
+    assert!(!restored.access_preferences.preview_tunnel);
+    assert_eq!(
+        restored.access_preferences.relay_url,
+        "https://relay.bruhs.example"
+    );
+    assert!(!restored.labs_flags.guest_links);
+    assert_eq!(restored.device_preferences.policy.key(), "off");
+}

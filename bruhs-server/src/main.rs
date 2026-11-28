@@ -26,7 +26,7 @@ pub mod desktop_server_client;
 
 use axum::{
     extract::DefaultBodyLimit,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use bruhs_core::AppState;
@@ -260,6 +260,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bruhs_core::remote_hosts::RemoteHostManager::default_path()?,
     )
     .await?;
+    let relay_mailbox = bruhs_core::relay_mailbox::RelayMailbox::open(
+        bruhs_core::relay_mailbox::RelayMailbox::default_path()?,
+    )
+    .await?;
+    let simlock_pool =
+        bruhs_core::simlock::SimlockPool::open(bruhs_core::simlock::SimlockPool::default_path()?)
+            .await?;
+    let wsl_manager =
+        bruhs_core::wsl::WslManager::open(bruhs_core::wsl::WslManager::default_path()?).await?;
     let app = app
         .merge(workbench_services(
             delivery,
@@ -267,6 +276,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.access.clone(),
         ))
         .layer(axum::Extension(remote_hosts.clone()))
+        .layer(axum::Extension(relay_mailbox))
+        .layer(axum::Extension(simlock_pool))
+        .layer(axum::Extension(wsl_manager))
         .layer(axum::Extension(retention))
         .layer(axum::Extension(coordination.clone()))
         .layer(axum::Extension(board_links.clone()))
@@ -572,6 +584,56 @@ fn router_with_capture_daemon(
         .route(
             "/api/local-tools/devices/video",
             get(routes::local_tools::device_video),
+        )
+        .route(
+            "/api/local-tools/devices/simlock",
+            get(routes::environment_parity::simlock_snapshot),
+        )
+        .route(
+            "/api/local-tools/devices/policy",
+            put(routes::environment_parity::simlock_set_policy),
+        )
+        .route(
+            "/api/local-tools/devices/simlock/hosts",
+            post(routes::environment_parity::simlock_upsert_host),
+        )
+        .route(
+            "/api/local-tools/devices/simlock/hosts/{id}",
+            delete(routes::environment_parity::simlock_remove_host),
+        )
+        .route(
+            "/api/local-tools/devices/simlock/hosts/{id}/probe",
+            post(routes::environment_parity::simlock_probe_host),
+        )
+        .route(
+            "/api/local-tools/devices/simlock/leases",
+            post(routes::environment_parity::simlock_acquire_lease),
+        )
+        .route(
+            "/api/local-tools/devices/simlock/leases/{id}",
+            delete(routes::environment_parity::simlock_release_lease),
+        )
+        .route(
+            "/api/relay",
+            get(routes::environment_parity::relay_snapshot)
+                .put(routes::environment_parity::relay_update),
+        )
+        .route(
+            "/api/relay/webhooks/hold",
+            post(routes::environment_parity::relay_hold_webhook),
+        )
+        .route(
+            "/api/relay/webhooks/flush",
+            post(routes::environment_parity::relay_flush_webhooks),
+        )
+        .route(
+            "/api/environment/wsl",
+            get(routes::environment_parity::wsl_status)
+                .put(routes::environment_parity::wsl_update_config),
+        )
+        .route(
+            "/api/environment/wsl/control",
+            post(routes::environment_parity::wsl_control),
         )
         .route(
             "/api/local-tools/browser/{session}/screencast",

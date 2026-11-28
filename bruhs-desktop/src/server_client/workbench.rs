@@ -285,6 +285,117 @@ impl ServerClient {
         Ok(())
     }
 
+    pub async fn relay_update(
+        &self,
+        config: &bruhs_models::environment_parity::RelayConfig,
+    ) -> Result<bruhs_models::environment_parity::RelaySnapshot, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/relay");
+        let response = Self::check(
+            self.local_owner_http()
+                .await?
+                .put(url)
+                .json(config)
+                .send()
+                .await,
+            "Update managed relay settings",
+        )
+        .await?;
+        Self::decode(response, "Update managed relay settings").await
+    }
+
+    pub async fn relay_flush_webhooks(
+        &self,
+    ) -> Result<bruhs_models::environment_parity::FlushWebhooksResponse, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/relay/webhooks/flush");
+        let response = Self::check(
+            self.local_owner_http().await?.post(url).send().await,
+            "Flush held webhooks",
+        )
+        .await?;
+        Self::decode(response, "Flush held webhooks").await
+    }
+
+    pub async fn simlock_set_policy(
+        &self,
+        policy: bruhs_models::environment_parity::DeviceAccessPolicy,
+    ) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/local-tools/devices/policy");
+        let response = Self::check(
+            self.local_owner_http()
+                .await?
+                .put(url)
+                .json(&bruhs_models::environment_parity::DevicePolicyUpdate { policy })
+                .send()
+                .await,
+            "Update device access policy",
+        )
+        .await?;
+        Self::decode(response, "Update device access policy").await
+    }
+
+    pub async fn simlock_upsert_host(
+        &self,
+        spec: &bruhs_models::environment_parity::SimlockHostSpec,
+    ) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/local-tools/devices/simlock/hosts");
+        let response = Self::check(
+            self.local_owner_http()
+                .await?
+                .post(url)
+                .json(spec)
+                .send()
+                .await,
+            "Save Simlock host",
+        )
+        .await?;
+        Self::decode(response, "Save Simlock host").await
+    }
+
+    pub async fn simlock_remove_host(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path(&format!("/api/local-tools/devices/simlock/hosts/{id}"));
+        let response = Self::check(
+            self.local_owner_http().await?.delete(url).send().await,
+            "Remove Simlock host",
+        )
+        .await?;
+        Self::decode(response, "Remove Simlock host").await
+    }
+
+    pub async fn simlock_probe_host(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<bruhs_models::environment_parity::SimlockProbeResult, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path(&format!(
+            "/api/local-tools/devices/simlock/hosts/{id}/probe"
+        ));
+        let response = Self::check(
+            self.local_owner_http().await?.post(url).send().await,
+            "Probe Simlock host",
+        )
+        .await?;
+        Self::decode(response, "Probe Simlock host").await
+    }
+
+    pub async fn simlock_release_lease(&self, id: uuid::Uuid) -> Result<(), ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path(&format!("/api/local-tools/devices/simlock/leases/{id}"));
+        Self::check(
+            self.local_owner_http().await?.delete(url).send().await,
+            "Release Simlock lease",
+        )
+        .await?;
+        Ok(())
+    }
+
     pub fn shortcut_access_url(&self) -> Result<reqwest::Url, ServerError> {
         let mut url = self.local_owner_base()?;
         url.set_path("/api/coordination/ui");

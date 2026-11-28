@@ -34,6 +34,7 @@ pub mod database;
 pub mod delivery;
 pub mod diagram;
 pub mod dictation_runtime;
+pub mod environment_parity;
 pub mod ids;
 pub mod imports;
 pub mod local_tools;

@@ -157,6 +157,7 @@ impl Workspace {
                 cx,
                 |this, _, cx| {
                     this.labs_flags.guest_links = !this.labs_flags.guest_links;
+                    this.sync_linked_labs_flags(cx);
                     this.persist_and_notify(cx);
                 },
             ),

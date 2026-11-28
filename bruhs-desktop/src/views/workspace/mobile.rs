@@ -29,6 +29,10 @@ pub(super) struct AccessPreferences {
     #[serde(default = "default_require_approval")]
     pub require_device_approval: bool,
     pub hold_webhooks_while_offline: bool,
+    pub publish_agent_activity: bool,
+    #[serde(default = "default_require_approval")]
+    pub preview_tunnel: bool,
+    pub relay_url: String,
 }
 
 impl Default for AccessPreferences {
@@ -37,11 +41,28 @@ impl Default for AccessPreferences {
             environment_icon: default_environment_icon(),
             require_device_approval: default_require_approval(),
             hold_webhooks_while_offline: false,
+            publish_agent_activity: false,
+            preview_tunnel: true,
+            relay_url: String::new(),
         }
     }
 }
 
 impl AccessPreferences {
+    pub(super) fn to_relay_config(&self) -> bruhs_models::environment_parity::RelayConfig {
+        let url = self.relay_url.trim().to_owned();
+        bruhs_models::environment_parity::RelayConfig {
+            enabled: !url.is_empty(),
+            relay_url: url,
+            environment_label: self.environment_icon.clone(),
+            publish_agent_activity: self.publish_agent_activity,
+            preview_tunnel: self.preview_tunnel,
+            require_device_approval: self.require_device_approval,
+            hold_webhooks_while_offline: self.hold_webhooks_while_offline,
+            max_hold_hours: 24,
+        }
+    }
+
     pub(super) const ICONS: &[(&str, &str)] = &[
         ("laptop", "Laptop"),
         ("desktop", "Desktop"),
@@ -68,6 +89,9 @@ pub(super) struct MobileUi {
     certificate: Entity<InputState>,
     key: Entity<InputState>,
     hours: Entity<InputState>,
+    relay_url_input: Entity<InputState>,
+    relay_notice: Option<String>,
+    held_webhooks: usize,
     proxy: bool,
     scopes: MobileScopes,
     offer: Option<(MobilePairingOffer, Arc<MobileQr>)>,
@@ -95,6 +119,10 @@ impl MobileUi {
             certificate: field("", window, cx),
             key: field("", window, cx),
             hours: field("8", window, cx),
+            relay_url_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("https://relay.example.com")),
+            relay_notice: None,
+            held_webhooks: 0,
             proxy: true,
             scopes: [MobileScope::Read].into(),
             offer: None,

@@ -25,6 +25,7 @@ pub mod coordination;
 pub mod database;
 pub mod delivery;
 pub mod editor;
+pub mod environment_parity;
 pub mod events_stream;
 pub mod files;
 pub mod git;

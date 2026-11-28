@@ -36,6 +36,15 @@ impl DeviceAccessPolicy {
         }
     }
 
+    pub(super) fn to_wire(self) -> bruhs_models::environment_parity::DeviceAccessPolicy {
+        match self {
+            Self::Ask => bruhs_models::environment_parity::DeviceAccessPolicy::Ask,
+            Self::ThreadOnly => bruhs_models::environment_parity::DeviceAccessPolicy::ThreadOnly,
+            Self::Persistent => bruhs_models::environment_parity::DeviceAccessPolicy::Persistent,
+            Self::Off => bruhs_models::environment_parity::DeviceAccessPolicy::Off,
+        }
+    }
+
     pub(super) fn from_key(key: &str) -> Option<Self> {
         match key {
             "ask" => Some(Self::Ask),
@@ -72,6 +81,8 @@ pub(super) struct Access {
     error: Option<String>,
     adding_simlock: bool,
     simlock_error: Option<String>,
+    simlock_probes: std::collections::HashMap<uuid::Uuid, String>,
+    simlock_leases: Vec<bruhs_models::environment_parity::SimlockLease>,
 }
 
 impl Workspace {
@@ -263,8 +274,52 @@ impl Workspace {
             return true;
         };
         self.device_preferences.policy = policy;
+        if cx.try_global::<DesktopState>().is_some() {
+            let wire = policy.to_wire();
+            let task = spawn_tokio(cx, async move {
+                ServerClient::workbench_client()
+                    .simlock_set_policy(wire)
+                    .await
+            });
+            cx.spawn(async move |this, cx| {
+                if let Ok(snap) = task.await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.local_tools.simlock_leases = snap.active_leases;
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
         self.persist_and_notify(cx);
         true
+    }
+
+    fn probe_simlock_host(&mut self, host_id: uuid::Uuid, cx: &mut Context<'_, Self>) {
+        if cx.try_global::<DesktopState>().is_none() {
+            return;
+        }
+        self.local_tools
+            .simlock_probes
+            .insert(host_id, "Testing connection…".into());
+        cx.notify();
+        let task = spawn_tokio(cx, async move {
+            ServerClient::workbench_client()
+                .simlock_probe_host(host_id)
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let message = match result {
+                    Ok(probe) => probe.detail,
+                    Err(err) => err.to_string(),
+                };
+                this.local_tools.simlock_probes.insert(host_id, message);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn device_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -320,6 +375,15 @@ impl Workspace {
         if self.labs_flags.simlock_hosts {
             for host in &self.device_preferences.simlock_hosts {
                 let host_id = host.id;
+                let probe_note = self.local_tools.simlock_probes.get(&host_id);
+                let test = web_button(
+                    SharedString::from(format!("device-probe-simlock-{host_id}")),
+                    WebButtonVariant::Outline,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .aria_label(format!("Test {}", host.label))
+                .child("Test");
                 let remove = web_button(
                     SharedString::from(format!("device-remove-simlock-{host_id}")),
                     WebButtonVariant::Ghost,
@@ -328,22 +392,85 @@ impl Workspace {
                 )
                 .aria_label(format!("Remove {}", host.label))
                 .child("Remove");
+                let mut desc = format!(
+                    "{} · Up to {} device{}, each released after {} min",
+                    host.origin,
+                    host.max_devices,
+                    if host.max_devices == 1 { "" } else { "s" },
+                    host.lease_minutes
+                );
+                if let Some(note) = probe_note {
+                    desc.push_str(" · ");
+                    desc.push_str(note);
+                }
+                let controls = div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(on_press_view(test, cx, move |this, _, cx| {
+                        this.probe_simlock_host(host_id, cx);
+                    }))
+                    .child(on_press_view(remove, cx, move |this, _, cx| {
+                        this.device_preferences
+                            .simlock_hosts
+                            .retain(|entry| entry.id != host_id);
+                        this.local_tools.simlock_probes.remove(&host_id);
+                        if cx.try_global::<DesktopState>().is_some() {
+                            let task = spawn_tokio(cx, async move {
+                                ServerClient::workbench_client()
+                                    .simlock_remove_host(host_id)
+                                    .await
+                            });
+                            cx.spawn(async move |this, cx| {
+                                if let Ok(snap) = task.await {
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.local_tools.simlock_leases = snap.active_leases;
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .detach();
+                        }
+                        this.persist_and_notify(cx);
+                    }));
+                rows.push(self.settings_row(
+                    format!("settings-simlock-host-{host_id}"),
+                    host.label.clone(),
+                    desc,
+                    controls.into_any_element(),
+                ));
+            }
+            for lease in &self.local_tools.simlock_leases {
+                let lease_id = lease.lease_id;
+                let release = web_button(
+                    SharedString::from(format!("device-release-lease-{lease_id}")),
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .aria_label(format!("Release {}", lease.device_id))
+                .child("Release");
                 rows.push(
                     self.settings_row(
-                        format!("settings-simlock-host-{host_id}"),
-                        host.label.clone(),
-                        format!(
-                            "{} · Up to {} device{}, each released after {} min",
-                            host.origin,
-                            host.max_devices,
-                            if host.max_devices == 1 { "" } else { "s" },
-                            host.lease_minutes
-                        ),
-                        on_press_view(remove, cx, move |this, _, cx| {
-                            this.device_preferences
-                                .simlock_hosts
-                                .retain(|entry| entry.id != host_id);
-                            this.persist_and_notify(cx);
+                        format!("settings-simlock-lease-{lease_id}"),
+                        format!("Leased · {}", lease.device_id),
+                        format!("{} · Thread {}", lease.host_label, lease.thread_id),
+                        on_press_view(release, cx, move |this, _, cx| {
+                            this.local_tools
+                                .simlock_leases
+                                .retain(|entry| entry.lease_id != lease_id);
+                            if cx.try_global::<DesktopState>().is_some() {
+                                let task = spawn_tokio(cx, async move {
+                                    ServerClient::workbench_client()
+                                        .simlock_release_lease(lease_id)
+                                        .await
+                                });
+                                cx.spawn(async move |_, _| {
+                                    let _ = task.await;
+                                })
+                                .detach();
+                            }
+                            cx.notify();
                         })
                         .into_any_element(),
                     ),
@@ -389,13 +516,32 @@ impl Workspace {
                             cx.notify();
                             return;
                         }
-                        this.device_preferences.simlock_hosts.push(SimlockHostConfig {
+                        let spec = SimlockHostConfig {
                             id: uuid::Uuid::new_v4(),
                             label,
                             origin,
                             max_devices: 2,
                             lease_minutes: 30,
-                        });
+                        };
+                        if cx.try_global::<DesktopState>().is_some() {
+                            let wire = bruhs_models::environment_parity::SimlockHostSpec {
+                                id: spec.id,
+                                label: spec.label.clone(),
+                                origin: spec.origin.clone(),
+                                max_devices: spec.max_devices,
+                                lease_minutes: spec.lease_minutes,
+                            };
+                            let task = spawn_tokio(cx, async move {
+                                ServerClient::workbench_client()
+                                    .simlock_upsert_host(&wire)
+                                    .await
+                            });
+                            cx.spawn(async move |_, _| {
+                                let _ = task.await;
+                            })
+                            .detach();
+                        }
+                        this.device_preferences.simlock_hosts.push(spec);
                         this.simlock_label_input
                             .update(cx, |i, cx| i.set_value("", window, cx));
                         this.simlock_origin_input

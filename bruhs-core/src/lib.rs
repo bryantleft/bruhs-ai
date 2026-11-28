@@ -39,11 +39,13 @@ pub mod pulls;
 pub mod reactive;
 pub mod reactive_tools;
 pub mod registry;
+pub mod relay_mailbox;
 pub mod remote_hosts;
 pub mod rich_responses;
 pub mod second_opinion;
 pub mod secret_sources;
 pub mod secrets;
+pub mod simlock;
 pub mod skills;
 pub mod store;
 pub mod summarize;
@@ -65,6 +67,7 @@ pub mod workspace_bridge;
 pub mod workspace_trust;
 pub mod worktree_meter;
 pub mod worktrees;
+pub mod wsl;
 
 pub use agent::{
     claude_uses_api_key, AgentOrchestrator, AgentTurn, McpServerInfo, OrchestratorEvent,
