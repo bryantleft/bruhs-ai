@@ -592,12 +592,12 @@ pub fn UsagePage() -> impl IntoView {
                                                     .email
                                                     .clone()
                                                     .or_else(|| account.workspace.clone());
-                                                let sources_line = if !account.sources.is_empty() {
-                                                    Some(account.sources.join(" · "))
+                                                let sources: Vec<String> = if !account.sources.is_empty() {
+                                                    account.sources.clone()
                                                 } else if account.on_device {
-                                                    Some("This computer".to_string())
+                                                    vec!["This computer".to_string()]
                                                 } else {
-                                                    None
+                                                    Vec::new()
                                                 };
                                                 view! {
                                                     <article class="flex flex-col gap-3 rounded-lychee bg-longan-900 p-4 inset-ring inset-ring-white/5">
@@ -618,8 +618,12 @@ pub fn UsagePage() -> impl IntoView {
                                                                 {subtitle.map(|text| view! {
                                                                     <p class="mt-0.5 truncate text-[11px] text-rambutan-500">{text}</p>
                                                                 })}
-                                                                {sources_line.map(|src| view! {
-                                                                    <p class="mt-0.5 truncate text-[11px] text-rambutan-500">{src}</p>
+                                                                {(!sources.is_empty()).then(|| view! {
+                                                                    <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                                                        {sources.into_iter().map(|src| view! {
+                                                                            <Badge tone=BadgeTone::Neutral>{src}</Badge>
+                                                                        }).collect_view()}
+                                                                    </div>
                                                                 })}
                                                             </div>
                                                             {reset_choice.map(|choice| {

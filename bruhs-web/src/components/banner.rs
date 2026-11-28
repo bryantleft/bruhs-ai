@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 
 use leptos::prelude::*;
 
+use crate::ui::Icon;
+
 /// Classification used for color-coding.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BannerKind {
@@ -163,25 +165,33 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
         let _dismiss_timeout = StoredValue::new_local(timeout);
     }
 
-    let (ring_class, icon_class, icon) = match banner.kind {
-        BannerKind::Info => ("inset-ring-white/12", "text-rambutan-300", "ℹ"),
-        BannerKind::Warning => ("inset-ring-durian-500/40", "text-durian-400", "⚠"),
+    let (ring_class, icon_class, icon_name) = match banner.kind {
+        BannerKind::Info => ("inset-ring-white/12", "text-rambutan-300", "info"),
+        BannerKind::Warning => (
+            "inset-ring-durian-500/40",
+            "text-durian-400",
+            "alert-triangle",
+        ),
         // Lychee is the system's error color; mangosteen is reserved for
         // decorative accents (design.bruhs.dev/llms.txt §color roles).
-        BannerKind::Error => ("inset-ring-lychee-500/40", "text-lychee-400", "✕"),
+        BannerKind::Error => (
+            "inset-ring-lychee-500/40",
+            "text-lychee-400",
+            "circle-alert",
+        ),
     };
 
     let message = banner.message;
 
     view! {
         <div class=format!(
-            "pointer-events-auto flex w-full min-w-0 max-w-[360px] shrink-0 items-start gap-2.5 rounded-[10px] bg-longan-900/95 inset-ring shadow-md pl-3 pr-2 py-2 text-body-sm text-rambutan-100 {ring_class}"
+            "pointer-events-auto flex w-full min-w-0 max-w-[360px] shrink-0 items-start gap-2.5 rounded-[10px] bg-longan-900/95 inset-ring shadow-md pl-3 pr-2 py-2.5 text-body-sm text-rambutan-100 {ring_class}"
         )>
             <span
-                class=format!("inline-flex h-[1.4em] shrink-0 items-center text-label leading-none {icon_class}")
+                class=format!("mt-[2px] inline-flex shrink-0 items-center justify-center {icon_class}")
                 aria-hidden="true"
             >
-                {icon}
+                <Icon name=icon_name size=16 />
             </span>
             <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
             {action.map(|action| view! {
@@ -199,10 +209,10 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
             <button
                 type="button"
                 aria-label="Dismiss notification"
-                class="bruhs-control -mr-1 -mt-1.5 inline-flex min-h-control min-w-control shrink-0 items-center justify-center rounded-seed opacity-60 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-opacity cursor-pointer"
+                class="bruhs-control -mr-1 -mt-1.5 inline-flex size-control shrink-0 items-center justify-center rounded-seed text-rambutan-400 hover:bg-longan-800/80 hover:text-rambutan-100 focus-visible:text-rambutan-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-colors cursor-pointer"
                 on:click=move |_| on_dismiss_btn(id_for_dismiss.clone())
             >
-                "×"
+                <Icon name="x" size=15 />
             </button>
         </div>
     }

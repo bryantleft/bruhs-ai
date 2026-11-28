@@ -366,16 +366,50 @@ impl Workspace {
                 cx.notify();
             }));
         }
-        rows.push(self.settings_row(
-            "settings-device-sources",
-            "Device sources",
-            source_labels.join(" · "),
-            source_controls.into_any_element(),
-        ));
+        let source_badges = div().flex().flex_wrap().items_center().gap_1p5().children(
+            source_labels.into_iter().map(|label| {
+                div()
+                    .px_2()
+                    .py_0p5()
+                    .rounded(px(999.0))
+                    .bg(theme::longan_800())
+                    .border_1()
+                    .border_color(theme::longan_700().opacity(0.6))
+                    .text_size(px(11.0))
+                    .text_color(theme::rambutan_300())
+                    .child(label)
+            }),
+        );
+        rows.push(
+            div()
+                .id("settings-device-sources")
+                .px_4()
+                .py_3()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1p5()
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .text_color(theme::rambutan_100())
+                                .child("Device sources"),
+                        )
+                        .child(source_badges),
+                )
+                .child(source_controls)
+                .into_any_element(),
+        );
         if self.labs_flags.simlock_hosts {
             for host in &self.device_preferences.simlock_hosts {
                 let host_id = host.id;
-                let probe_note = self.local_tools.simlock_probes.get(&host_id);
+                let probe_note = self.local_tools.simlock_probes.get(&host_id).cloned();
                 let test = web_button(
                     SharedString::from(format!("device-probe-simlock-{host_id}")),
                     WebButtonVariant::Outline,
@@ -392,17 +426,6 @@ impl Workspace {
                 )
                 .aria_label(format!("Remove {}", host.label))
                 .child("Remove");
-                let mut desc = format!(
-                    "{} · Up to {} device{}, each released after {} min",
-                    host.origin,
-                    host.max_devices,
-                    if host.max_devices == 1 { "" } else { "s" },
-                    host.lease_minutes
-                );
-                if let Some(note) = probe_note {
-                    desc.push_str(" · ");
-                    desc.push_str(note);
-                }
                 let controls = div()
                     .flex()
                     .items_center()
@@ -433,12 +456,90 @@ impl Workspace {
                         }
                         this.persist_and_notify(cx);
                     }));
-                rows.push(self.settings_row(
-                    format!("settings-simlock-host-{host_id}"),
-                    host.label.clone(),
-                    desc,
-                    controls.into_any_element(),
-                ));
+                let host_badges = div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .px_2()
+                            .py_0p5()
+                            .rounded(px(999.0))
+                            .bg(theme::longan_800())
+                            .border_1()
+                            .border_color(theme::longan_700().opacity(0.6))
+                            .text_size(px(11.0))
+                            .text_color(theme::rambutan_300())
+                            .child(format!("Max {}", host.max_devices)),
+                    )
+                    .child(
+                        div()
+                            .px_2()
+                            .py_0p5()
+                            .rounded(px(999.0))
+                            .bg(theme::longan_800())
+                            .border_1()
+                            .border_color(theme::longan_700().opacity(0.6))
+                            .text_size(px(11.0))
+                            .text_color(theme::rambutan_300())
+                            .child(format!("{}m lease", host.lease_minutes)),
+                    )
+                    .when_some(probe_note, |el, note| {
+                        el.child(
+                            div()
+                                .px_2()
+                                .py_0p5()
+                                .rounded(px(999.0))
+                                .bg(theme::longan_800())
+                                .border_1()
+                                .border_color(theme::longan_700().opacity(0.6))
+                                .text_size(px(11.0))
+                                .text_color(theme::rambutan_200())
+                                .child(note),
+                        )
+                    });
+                rows.push(
+                    div()
+                        .id(SharedString::from(format!(
+                            "settings-simlock-host-{host_id}"
+                        )))
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_wrap()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .child(
+                                            div()
+                                                .text_size(px(13.0))
+                                                .text_color(theme::rambutan_100())
+                                                .child(host.label.clone()),
+                                        )
+                                        .child(host_badges),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(theme::rambutan_500())
+                                        .child(host.origin.clone()),
+                                ),
+                        )
+                        .child(controls)
+                        .into_any_element(),
+                );
             }
             for lease in &self.local_tools.simlock_leases {
                 let lease_id = lease.lease_id;
@@ -451,11 +552,65 @@ impl Workspace {
                 .aria_label(format!("Release {}", lease.device_id))
                 .child("Release");
                 rows.push(
-                    self.settings_row(
-                        format!("settings-simlock-lease-{lease_id}"),
-                        format!("Leased · {}", lease.device_id),
-                        format!("{} · Thread {}", lease.host_label, lease.thread_id),
-                        on_press_view(release, cx, move |this, _, cx| {
+                    div()
+                        .id(SharedString::from(format!(
+                            "settings-simlock-lease-{lease_id}"
+                        )))
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_1p5()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded(px(999.0))
+                                        .bg(theme::blueberry_500().opacity(0.18))
+                                        .text_size(px(11.0))
+                                        .text_color(theme::blueberry_300())
+                                        .child("Leased"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .text_color(theme::rambutan_100())
+                                        .child(lease.device_id.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded(px(999.0))
+                                        .bg(theme::longan_800())
+                                        .border_1()
+                                        .border_color(theme::longan_700().opacity(0.6))
+                                        .text_size(px(11.0))
+                                        .text_color(theme::rambutan_300())
+                                        .child(lease.host_label.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded(px(999.0))
+                                        .bg(theme::longan_800())
+                                        .border_1()
+                                        .border_color(theme::longan_700().opacity(0.6))
+                                        .text_size(px(11.0))
+                                        .text_color(theme::rambutan_400())
+                                        .child(format!("Thread {}", lease.thread_id)),
+                                ),
+                        )
+                        .child(on_press_view(release, cx, move |this, _, cx| {
                             this.local_tools
                                 .simlock_leases
                                 .retain(|entry| entry.lease_id != lease_id);
@@ -471,9 +626,8 @@ impl Workspace {
                                 .detach();
                             }
                             cx.notify();
-                        })
+                        }))
                         .into_any_element(),
-                    ),
                 );
             }
             if self.local_tools.adding_simlock {
@@ -617,6 +771,8 @@ impl Workspace {
             } else {
                 "Apple simulator"
             };
+            let is_booted =
+                d.state.eq_ignore_ascii_case("booted") || d.state.eq_ignore_ascii_case("running");
             rows.push(
                 div()
                     .p_3()
@@ -625,12 +781,49 @@ impl Workspace {
                     .items_center()
                     .gap_2()
                     .child(
-                        div().min_w_0().child(d.name.clone()).child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::rambutan_500())
-                                .child(format!("{platform} · {}", d.state)),
-                        ),
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(d.name.clone())
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .child(
+                                        div()
+                                            .px_2()
+                                            .py_0p5()
+                                            .rounded(px(999.0))
+                                            .bg(theme::longan_800())
+                                            .border_1()
+                                            .border_color(theme::longan_700().opacity(0.6))
+                                            .text_size(px(11.0))
+                                            .text_color(theme::rambutan_300())
+                                            .child(platform),
+                                    )
+                                    .child(
+                                        div()
+                                            .px_2()
+                                            .py_0p5()
+                                            .rounded(px(999.0))
+                                            .bg(if is_booted {
+                                                theme::pandan_500().opacity(0.18)
+                                            } else {
+                                                theme::longan_800()
+                                            })
+                                            .text_size(px(11.0))
+                                            .text_color(if is_booted {
+                                                theme::pandan_300()
+                                            } else {
+                                                theme::rambutan_400()
+                                            })
+                                            .child(d.state.clone()),
+                                    ),
+                            ),
                     )
                     .child(control)
                     .into_any_element(),

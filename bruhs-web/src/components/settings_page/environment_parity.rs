@@ -338,16 +338,11 @@ pub fn EnvironmentsSettings() -> impl IntoView {
                             .diagnostic
                             .clone()
                             .unwrap_or_else(|| "WSL is not installed on this machine.".to_string()),
-                        Some(s) => {
-                            let running = s
-                                .running_distro
-                                .as_deref()
-                                .unwrap_or("none running");
-                            format!(
-                                "{} distro(s) detected · active: {running}",
-                                s.distros.len()
-                            )
-                        }
+                        Some(s) => match s.distros.len() {
+                            0 => "No WSL distributions installed.".to_string(),
+                            1 => "1 distribution detected.".to_string(),
+                            n => format!("{n} distributions detected."),
+                        },
                     })
                 })
             >
@@ -419,13 +414,18 @@ pub fn EnvironmentsSettings() -> impl IntoView {
                         (!distros.is_empty()).then(|| view! {
                             <div class="flex flex-wrap gap-2">
                                 {distros.into_iter().map(|d| {
-                                    let tone = match d.state {
-                                        WslDistroState::Running => BadgeTone::Success,
-                                        WslDistroState::Installing => BadgeTone::Warning,
-                                        WslDistroState::Stopped | WslDistroState::Unknown => BadgeTone::Neutral,
+                                    let (tone, state_label) = match d.state {
+                                        WslDistroState::Running => (BadgeTone::Success, "Running"),
+                                        WslDistroState::Installing => (BadgeTone::Warning, "Installing"),
+                                        WslDistroState::Stopped => (BadgeTone::Neutral, "Stopped"),
+                                        WslDistroState::Unknown => (BadgeTone::Neutral, "Unknown"),
                                     };
                                     view! {
-                                        <Badge tone=tone>{format!("{} (WSL{})", d.name, d.version)}</Badge>
+                                        <span class="inline-flex items-center gap-1.5 rounded-grape bg-longan-950/70 px-2.5 py-1 text-label-sm inset-ring inset-ring-white/5">
+                                            <span class="text-rambutan-100">{d.name}</span>
+                                            <Badge tone=BadgeTone::Neutral>{format!("WSL {}", d.version)}</Badge>
+                                            <Badge tone=tone>{state_label}</Badge>
+                                        </span>
                                     }
                                 }).collect_view()}
                             </div>
@@ -584,9 +584,7 @@ pub fn DevicesSettings(labs: RwSignal<WebLabsFlags>) -> impl IntoView {
                     if !labs.get().simlock_hosts {
                         "Enable Simlock remote hosts in Labs below to configure remote pools.".to_string()
                     } else {
-                        let count = pool.with(|p| p.hosts.len());
-                        let leases = pool.with(|p| p.active_leases.len());
-                        format!("{count} host(s) configured · {leases} active lease(s)")
+                        String::new()
                     }
                 })
             >
@@ -594,17 +592,33 @@ pub fn DevicesSettings(labs: RwSignal<WebLabsFlags>) -> impl IntoView {
                     when=move || labs.get().simlock_hosts
                     fallback=|| view! { <Badge tone=BadgeTone::Neutral>"Labs"</Badge> }
                 >
-                    <Button
-                        variant=ButtonVariant::Outline
-                        size=ButtonSize::Small
-                        disabled=Signal::derive(move || policy_busy.get())
-                        on_click=Callback::new(move |_| {
-                            adding_host.update(|open| *open = !*open);
-                            host_error.set(None);
-                        })
-                    >
-                        {move || if adding_host.get() { "Cancel" } else { "Add host" }}
-                    </Button>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Badge tone=BadgeTone::Neutral>
+                            {move || {
+                                let count = pool.with(|p| p.hosts.len());
+                                if count == 1 { "1 host".to_string() } else { format!("{count} hosts") }
+                            }}
+                        </Badge>
+                        <Show when=move || { pool.with(|p| !p.active_leases.is_empty()) }>
+                            <Badge tone=BadgeTone::Info>
+                                {move || {
+                                    let leases = pool.with(|p| p.active_leases.len());
+                                    if leases == 1 { "1 lease".to_string() } else { format!("{leases} leases") }
+                                }}
+                            </Badge>
+                        </Show>
+                        <Button
+                            variant=ButtonVariant::Outline
+                            size=ButtonSize::Small
+                            disabled=Signal::derive(move || policy_busy.get())
+                            on_click=Callback::new(move |_| {
+                                adding_host.update(|open| *open = !*open);
+                                host_error.set(None);
+                            })
+                        >
+                            {move || if adding_host.get() { "Cancel" } else { "Add host" }}
+                        </Button>
+                    </div>
                 </Show>
             </SettingsRow>
 
@@ -680,11 +694,14 @@ pub fn DevicesSettings(labs: RwSignal<WebLabsFlags>) -> impl IntoView {
                                     view! {
                                         <div class="flex flex-wrap items-center justify-between gap-2 rounded-grape bg-longan-950/60 px-3 py-2 inset-ring inset-ring-white/5">
                                             <div class="min-w-0">
-                                                <div class="flex items-center gap-2 text-label-sm font-medium text-rambutan-100">
+                                                <div class="flex flex-wrap items-center gap-1.5 text-label-sm font-medium text-rambutan-100">
                                                     <span>{host.label}</span>
-                                                    <span class="font-mono text-[11px] text-rambutan-500">
-                                                        {format!("max {} · {}m", host.max_devices, host.lease_minutes)}
-                                                    </span>
+                                                    <Badge tone=BadgeTone::Neutral>
+                                                        {format!("Max {}", host.max_devices)}
+                                                    </Badge>
+                                                    <Badge tone=BadgeTone::Neutral>
+                                                        {format!("{}m lease", host.lease_minutes)}
+                                                    </Badge>
                                                 </div>
                                                 <div class="truncate font-mono text-[11px] text-rambutan-400">
                                                     {host.origin}
@@ -715,13 +732,18 @@ pub fn DevicesSettings(labs: RwSignal<WebLabsFlags>) -> impl IntoView {
 
                                 {snap.active_leases.into_iter().map(|lease| {
                                     let lease_id = lease.lease_id;
+                                    let platform_label = match lease.platform {
+                                        bruhs_models::local_tools::DevicePlatform::Ios => "iOS",
+                                        bruhs_models::local_tools::DevicePlatform::Android => "Android",
+                                    };
                                     view! {
                                         <div class="flex flex-wrap items-center justify-between gap-2 rounded-grape bg-longan-950/60 px-3 py-2 inset-ring inset-ring-blueberry-400/20">
                                             <div class="min-w-0 text-label-sm">
-                                                <div class="flex items-center gap-2 text-rambutan-100">
+                                                <div class="flex flex-wrap items-center gap-1.5 text-rambutan-100">
                                                     <Badge tone=BadgeTone::Info>"Lease"</Badge>
                                                     <span class="font-mono">{lease.device_id}</span>
-                                                    <span class="text-rambutan-500">{lease.host_label}</span>
+                                                    <Badge tone=BadgeTone::Neutral>{platform_label}</Badge>
+                                                    <Badge tone=BadgeTone::Neutral>{lease.host_label}</Badge>
                                                 </div>
                                             </div>
                                             <Button

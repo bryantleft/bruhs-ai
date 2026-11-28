@@ -178,7 +178,7 @@ impl NoticeCard {
                     .child(
                         svg()
                             .path(icons::CLOSE)
-                            .size(px(theme::ICON_INLINE_SM_PX))
+                            .size(px(15.0))
                             .text_color(theme::rambutan_400()),
                     ),
                 move |window, cx| dismiss(window, cx),

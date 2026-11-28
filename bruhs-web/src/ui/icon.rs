@@ -283,6 +283,7 @@ fn icon_body(name: &str) -> &'static str {
         "server" => {
             r#"<rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>"#
         }
+        "info" => r#"<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>"#,
 
         // Fallback — a muted dot so missing names don't crash the view.
         _ => r#"<circle cx="12" cy="12" r="2"/>"#,
