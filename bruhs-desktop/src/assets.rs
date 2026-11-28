@@ -72,6 +72,7 @@ pub const DOWNLOAD_ICON_PATH: &str = icons::DOWNLOAD;
 pub const HELP_CIRCLE_ICON_PATH: &str = icons::HELP_CIRCLE;
 pub const EXTERNAL_LINK_ICON_PATH: &str = icons::EXTERNAL_LINK;
 pub const REFRESH_ICON_PATH: &str = icons::REFRESH;
+pub const LAYOUT_DASHBOARD_ICON_PATH: &str = icons::LAYOUT_DASHBOARD;
 
 pub struct DesktopAssets;
 

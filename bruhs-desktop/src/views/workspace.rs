@@ -1707,6 +1707,12 @@ pub struct Workspace {
     thread_menu_snooze_only: bool,
     /// Focus targets for the thread menu's items (`ThreadMenuItem` slots).
     thread_menu_items: Rc<[FocusHandle]>,
+    /// Whether the sidebar footer's Apps view-switcher popover is open.
+    sidebar_apps_open: bool,
+    /// Focus target for the sidebar footer's Apps trigger button.
+    sidebar_apps_trigger_focus: FocusHandle,
+    /// Focus targets for the Apps popover items (`SidebarAppSpec` slots).
+    sidebar_apps_items: Rc<[FocusHandle]>,
     /// The thread menu's "Custom…" snooze fields.
     snooze_inputs: snooze_ui::SnoozeInputs,
     /// The knowledge record picker's search field and list scroll.
@@ -3008,6 +3014,11 @@ impl Workspace {
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
                 .collect(),
+            sidebar_apps_open: false,
+            sidebar_apps_trigger_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            sidebar_apps_items: (0..sidebar_ui::SIDEBAR_APPS_ITEM_COUNT)
+                .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
+                .collect(),
             snooze_inputs: snooze_ui::SnoozeInputs::new(window, cx),
             record_picker,
             booking: booking_ui::BookingUi::new(window, cx),
@@ -4202,6 +4213,22 @@ impl Render for Workspace {
                 }
             });
         }
+        let sidebar_shown = if sidebar_drawer {
+            self.compact_sidebar_open
+        } else {
+            self.sidebar_visible
+        };
+        let apps_menu_focused = self.sidebar_apps_menu_has_focus(window);
+        if self.sidebar_apps_open && !sidebar_shown {
+            self.sidebar_apps_open = false;
+        }
+        if !self.sidebar_apps_open && apps_menu_focused {
+            cx.defer_in(window, |this, window, cx| {
+                if !this.sidebar_apps_open && this.sidebar_apps_menu_has_focus(window) {
+                    this.workspace_focus_handle.focus(window, cx);
+                }
+            });
+        }
         // Retain filters while the same dialog is open. On close, remove them
         // from the native layers so the Metal-backed workspace stays crisp.
         if self.top_layer.is_none() && self.overlay.is_none() {
@@ -4702,6 +4729,32 @@ impl Render for Workspace {
                             cx.listener(|this, _event, window, cx| {
                                 cx.stop_propagation();
                                 this.close_thread_menu(window, cx);
+                            }),
+                        ),
+                )
+            })
+            .when(self.sidebar_apps_open, |el| {
+                el.child(
+                    div()
+                        .id("desktop-sidebar-apps-backdrop")
+                        .debug_selector(|| "desktop-sidebar-apps-backdrop".to_string())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                cx.stop_propagation();
+                                this.close_sidebar_apps_menu(window, cx);
+                            }),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(|this, _event, window, cx| {
+                                cx.stop_propagation();
+                                this.close_sidebar_apps_menu(window, cx);
                             }),
                         ),
                 )

@@ -4278,48 +4278,48 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
         .clone()
         .expect("workspace entity should be captured");
 
-    // Web sidebar footer: today · tasks · terminal · calendar · meetings · people, settings.
+    // Single-row sidebar footer dock: Apps popover trigger + Usage + Settings.
     assert_rendered_bounds(cx, "desktop-sidebar-toggle");
     assert_rendered_bounds(cx, "desktop-sidebar-footer");
     for selector in [
-        "desktop-sidebar-nav-today",
-        "desktop-sidebar-nav-tasks",
-        "desktop-sidebar-nav-terminal",
-        "desktop-sidebar-nav-calendar",
-        "desktop-sidebar-nav-meetings",
-        "desktop-sidebar-nav-people",
+        "desktop-sidebar-apps-trigger",
+        "desktop-sidebar-nav-usage",
         "desktop-sidebar-nav-settings",
     ] {
         assert_rendered_bounds(cx, selector);
     }
 
-    click_debug_selector(cx, "desktop-sidebar-nav-today");
-    cx.run_until_parked();
+    let open_app = |cx: &mut gpui::VisualTestContext, selector: &'static str| {
+        click_debug_selector(cx, "desktop-sidebar-apps-trigger");
+        cx.run_until_parked();
+        assert_rendered_bounds(cx, "desktop-sidebar-apps-menu");
+        click_debug_selector(cx, selector);
+        cx.run_until_parked();
+        assert_no_rendered_bounds(cx, "desktop-sidebar-apps-menu");
+    };
+
+    open_app(cx, "desktop-sidebar-nav-today");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Today);
     });
     assert_rendered_bounds(cx, "desktop-today-scroll");
 
-    click_debug_selector(cx, "desktop-sidebar-nav-tasks");
-    cx.run_until_parked();
+    open_app(cx, "desktop-sidebar-nav-tasks");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Tasks);
     });
     // The thread sidebar stays on every view, like the web.
     assert_rendered_bounds(cx, "desktop-workspace-sidebar");
 
-    click_debug_selector(cx, "desktop-sidebar-nav-calendar");
-    cx.run_until_parked();
+    open_app(cx, "desktop-sidebar-nav-calendar");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Calendar);
     });
-    click_debug_selector(cx, "desktop-sidebar-nav-terminal");
-    cx.run_until_parked();
+    open_app(cx, "desktop-sidebar-nav-terminal");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Terminal);
     });
-    click_debug_selector(cx, "desktop-sidebar-nav-people");
-    cx.run_until_parked();
+    open_app(cx, "desktop-sidebar-nav-people");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::People);
     });
@@ -4361,12 +4361,13 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     }
 }
 
-/// Ten views and settings do not fit one row of 32px buttons in the sidebar.
-/// Like the web's grid, they sit in rows of six spread across the footer,
-/// settings in the last column, and each button keeps its 32px. Agent
-/// workflows carries the unread count in its corner and opens its page.
+/// The sidebar footer is a single-row dock: a labeled `Apps` switcher pill on
+/// the left and compact utility controls (`Usage`, optional update check, and
+/// `Settings`) on the right. Clicking `Apps` opens a grouped, labeled popover
+/// above the footer with all 10 views; Agent workflows unread updates surface
+/// both on the `Apps` trigger and inside the popover.
 #[gpui::test]
-fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::TestAppContext) {
+fn desktop_sidebar_footer_single_row_dock_and_apps_popover(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
         bruhs_ui::init(cx);
         bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
@@ -4388,54 +4389,39 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
     cx.run_until_parked();
 
     let footer = rendered_bounds(cx, "desktop-sidebar-footer");
-    let first: Vec<_> = [
-        "desktop-sidebar-nav-today",
-        "desktop-sidebar-nav-inbox",
-        "desktop-sidebar-nav-knowledge",
-        "desktop-sidebar-nav-tasks",
-        "desktop-sidebar-nav-terminal",
-        "desktop-sidebar-nav-workbench",
-    ]
-    .into_iter()
-    .map(|selector| rendered_bounds(cx, selector))
-    .collect();
-    let second: Vec<_> = [
-        "desktop-sidebar-nav-calendar",
-        "desktop-sidebar-nav-meetings",
-        "desktop-sidebar-nav-people",
-        "desktop-sidebar-nav-agent-workflows",
-    ]
-    .into_iter()
-    .map(|selector| rendered_bounds(cx, selector))
-    .collect();
-    let settings = rendered_bounds(cx, "desktop-sidebar-nav-settings");
-    for button in first.iter().chain(&second).chain([&settings]) {
-        assert_eq!(
-            (f32::from(button.size.width), f32::from(button.size.height)),
-            (theme::CONTROL_PX, theme::CONTROL_PX),
-            "every footer button keeps its 32px"
-        );
-    }
-    assert!(first.iter().all(|button| button.top() == first[0].top()));
-    let second_top = first[0].top() + px(theme::CONTROL_PX + 4.0);
-    assert!(second.iter().all(|button| button.top() == second_top));
+    let trigger = rendered_bounds(cx, "desktop-sidebar-apps-trigger");
     let usage = rendered_bounds(cx, "desktop-sidebar-nav-usage");
-    assert_eq!(usage.top(), second_top);
-    let settings_top = if cx.debug_bounds("desktop-sidebar-check-updates").is_some() {
-        second_top + px(theme::CONTROL_PX + 4.0)
-    } else {
-        second_top
-    };
-    assert_eq!(settings.top(), settings_top);
-    // Columns line up across the rows, edge to edge inside the 8px padding.
-    for (upper, lower) in first.iter().zip(&second) {
-        assert_eq!(upper.left(), lower.left());
-    }
-    assert_eq!(first[0].left(), footer.left() + px(8.0));
-    assert_eq!(first[5].right(), footer.right() - px(8.0));
-    assert_eq!(settings.left(), first[5].left());
+    let settings = rendered_bounds(cx, "desktop-sidebar-nav-settings");
 
-    assert_no_rendered_bounds(cx, "desktop-sidebar-agent-workflows-badge");
+    // All dock controls sit on a single horizontal row (32px controls inside 8px vertical padding + 1px border).
+    assert_eq!(f32::from(trigger.size.height), theme::CONTROL_PX);
+    assert_eq!(
+        (f32::from(usage.size.width), f32::from(usage.size.height)),
+        (theme::CONTROL_PX, theme::CONTROL_PX)
+    );
+    assert_eq!(
+        (
+            f32::from(settings.size.width),
+            f32::from(settings.size.height)
+        ),
+        (theme::CONTROL_PX, theme::CONTROL_PX)
+    );
+    assert_eq!(trigger.top(), usage.top());
+    assert_eq!(trigger.top(), settings.top());
+    if let Some(check) = cx.debug_bounds("desktop-sidebar-check-updates") {
+        assert_eq!(trigger.top(), check.top());
+    }
+    assert!(
+        f32::from(footer.size.height) <= 52.0,
+        "footer should remain a single compact row, got {}px",
+        f32::from(footer.size.height)
+    );
+    assert_eq!(trigger.left(), footer.left() + px(8.0));
+    assert_eq!(settings.right(), footer.right() - px(8.0));
+    assert_no_rendered_bounds(cx, "desktop-sidebar-apps-menu");
+    assert_no_rendered_bounds(cx, "desktop-sidebar-apps-unread-badge");
+
+    // Unread Agent workflows count surfaces directly on the Apps trigger even while closed.
     workspace.update_in(cx, |workspace, _window, cx| {
         let unread = |id: &str| bruhs_models::reactive::OutboxItem {
             id: id.into(),
@@ -4463,14 +4449,44 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
         cx.notify();
     });
     cx.run_until_parked();
-    let button = rendered_bounds(cx, "desktop-sidebar-nav-agent-workflows");
-    let badge = rendered_bounds(cx, "desktop-sidebar-agent-workflows-badge");
-    assert_eq!(f32::from(badge.size.height), 16.0);
-    assert_eq!(badge.top(), button.top() - px(2.0));
-    assert_eq!(badge.right(), button.right() + px(2.0));
+    let trigger_badge = rendered_bounds(cx, "desktop-sidebar-apps-unread-badge");
+    assert_eq!(f32::from(trigger_badge.size.height), 16.0);
 
+    // Opening the Apps popover floats above the footer with all 10 views and the unread badge.
+    click_debug_selector(cx, "desktop-sidebar-apps-trigger");
+    cx.run_until_parked();
+    let menu = rendered_bounds(cx, "desktop-sidebar-apps-menu");
+    assert!(
+        menu.bottom() <= trigger.top(),
+        "Apps popover should open above the footer trigger"
+    );
+    for selector in [
+        "desktop-sidebar-nav-today",
+        "desktop-sidebar-nav-inbox",
+        "desktop-sidebar-nav-tasks",
+        "desktop-sidebar-nav-calendar",
+        "desktop-sidebar-nav-meetings",
+        "desktop-sidebar-nav-knowledge",
+        "desktop-sidebar-nav-people",
+        "desktop-sidebar-nav-terminal",
+        "desktop-sidebar-nav-workbench",
+        "desktop-sidebar-nav-agent-workflows",
+        "desktop-sidebar-agent-workflows-badge",
+    ] {
+        assert_rendered_bounds(cx, selector);
+    }
+
+    // Escape closes the popover cleanly without leaving it open.
+    press_key(cx, "escape");
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-sidebar-apps-menu");
+
+    // Reopen and choose Agent workflows from the popover.
+    click_debug_selector(cx, "desktop-sidebar-apps-trigger");
+    cx.run_until_parked();
     click_debug_selector(cx, "desktop-sidebar-nav-agent-workflows");
     cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-sidebar-apps-menu");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Automations);
     });

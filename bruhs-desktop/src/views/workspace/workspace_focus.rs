@@ -178,6 +178,7 @@ impl Workspace {
             return false;
         }
         self.close_thread_menu(window, cx);
+        self.close_sidebar_apps_menu(window, cx);
         let regions = self.focus_regions(window, cx);
         let focused = window.focused(cx);
         let current = focused.as_ref().and_then(|focused| {

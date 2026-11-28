@@ -809,6 +809,11 @@ impl Workspace {
             }
             "linked-thread-hero" => self.smoke_seed_linked_thread(false, window, cx),
             "linked-thread-conversation" => self.smoke_seed_linked_thread(true, window, cx),
+            "sidebar-apps-menu" => {
+                self.sidebar_visible = true;
+                self.sidebar_apps_open = true;
+                cx.notify();
+            }
             "transcript"
             | "transcript-prose"
             | "transcript-diff"

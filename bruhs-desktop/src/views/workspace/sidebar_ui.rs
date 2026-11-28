@@ -331,19 +331,127 @@ pub(super) const THREAD_MENU_MAX_ITEMS: usize =
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
-/// Ten views and settings would need 372px in one row of 32px buttons; the
-/// footer has 232px. They sit in rows of six spread across the row (web: a
-/// six-column grid with `justify-between`), 4px apart (`gap-y-1`).
-pub(super) const SIDEBAR_FOOTER_COLUMNS: usize = 6;
-const SIDEBAR_FOOTER_ROW_GAP_PX: f32 = 4.0;
-/// Agent workflows' unread count, pinned 2px outside the button's top right
-/// corner (web: `h-[16px] min-w-[16px] px-1 text-[11px]`).
+/// Footer Apps popover width: aligns flush inside the 248px sidebar (`248 - 16`).
+const SIDEBAR_APPS_MENU_WIDTH_PX: f32 = 232.0;
+const SIDEBAR_APPS_ROW_PX: f32 = 30.0;
+const SIDEBAR_APPS_CHEVRON_PX: f32 = 12.0;
+const SIDEBAR_APPS_CHECK_PX: f32 = 13.0;
+const SIDEBAR_APPS_GROUP_TEXT_PX: f32 = 10.0;
+/// Number of views listed inside the footer's Apps popover.
+pub(super) const SIDEBAR_APPS_ITEM_COUNT: usize = SIDEBAR_APP_SPECS.len();
+/// Agent workflows' unread count pill (`h-[16px] min-w-[16px] px-1 text-[11px]`).
 const SIDEBAR_BADGE_HEIGHT_PX: f32 = 16.0;
 const SIDEBAR_BADGE_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_BADGE_TEXT_PX: f32 = 11.0;
-/// Insets start inside the button's 1px focus border, so 2px outside its
-/// edge is 3px from there.
-const SIDEBAR_BADGE_OFFSET_PX: f32 = -3.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidebarAppGroup {
+    Workspace,
+    ToolsAndAgents,
+}
+
+#[derive(Clone, Copy)]
+struct SidebarAppSpec {
+    slot: usize,
+    group: SidebarAppGroup,
+    label: &'static str,
+    icon_path: &'static str,
+    selector: &'static str,
+}
+
+impl SidebarAppSpec {
+    fn view(self) -> AppView {
+        match self.slot {
+            0 => AppView::Today,
+            1 => AppView::Inbox,
+            2 => AppView::Tasks,
+            3 => AppView::Calendar,
+            4 => AppView::Meetings,
+            5 => AppView::Knowledge,
+            6 => AppView::People,
+            7 => AppView::Terminal,
+            8 => AppView::Workbench,
+            _ => AppView::Automations,
+        }
+    }
+
+    fn is_automations(self) -> bool {
+        self.slot == 9
+    }
+}
+
+const SIDEBAR_APP_SPECS: [SidebarAppSpec; 10] = [
+    SidebarAppSpec {
+        slot: 0,
+        group: SidebarAppGroup::Workspace,
+        label: "Today",
+        icon_path: assets::SUN_ICON_PATH,
+        selector: "desktop-sidebar-nav-today",
+    },
+    SidebarAppSpec {
+        slot: 1,
+        group: SidebarAppGroup::Workspace,
+        label: "Inbox",
+        icon_path: assets::INBOX_ICON_PATH,
+        selector: "desktop-sidebar-nav-inbox",
+    },
+    SidebarAppSpec {
+        slot: 2,
+        group: SidebarAppGroup::Workspace,
+        label: "Tasks",
+        icon_path: assets::LIST_CHECKS_ICON_PATH,
+        selector: "desktop-sidebar-nav-tasks",
+    },
+    SidebarAppSpec {
+        slot: 3,
+        group: SidebarAppGroup::Workspace,
+        label: "Calendar",
+        icon_path: assets::CALENDAR_ICON_PATH,
+        selector: "desktop-sidebar-nav-calendar",
+    },
+    SidebarAppSpec {
+        slot: 4,
+        group: SidebarAppGroup::Workspace,
+        label: "Meetings",
+        icon_path: assets::MIC_ICON_PATH,
+        selector: "desktop-sidebar-nav-meetings",
+    },
+    SidebarAppSpec {
+        slot: 5,
+        group: SidebarAppGroup::Workspace,
+        label: "Knowledge",
+        icon_path: assets::BOOK_OPEN_ICON_PATH,
+        selector: "desktop-sidebar-nav-knowledge",
+    },
+    SidebarAppSpec {
+        slot: 6,
+        group: SidebarAppGroup::Workspace,
+        label: "People",
+        icon_path: assets::USERS_ICON_PATH,
+        selector: "desktop-sidebar-nav-people",
+    },
+    SidebarAppSpec {
+        slot: 7,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Terminal",
+        icon_path: assets::TOOL_TERMINAL_ICON_PATH,
+        selector: "desktop-sidebar-nav-terminal",
+    },
+    SidebarAppSpec {
+        slot: 8,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Workbench",
+        icon_path: assets::WRENCH_ICON_PATH,
+        selector: "desktop-sidebar-nav-workbench",
+    },
+    SidebarAppSpec {
+        slot: 9,
+        group: SidebarAppGroup::ToolsAndAgents,
+        label: "Agent workflows",
+        icon_path: assets::BOT_ICON_PATH,
+        selector: "desktop-sidebar-nav-agent-workflows",
+    },
+];
 const HOVER_BG_OPACITY_40: f32 = 0.40;
 const HOVER_BG_OPACITY_50: f32 = 0.50;
 const ACTIVE_BG_OPACITY_60: f32 = 0.60;
@@ -2016,6 +2124,7 @@ impl Workspace {
             self.close_thread_menu(window, cx);
             return;
         }
+        self.sidebar_apps_open = false;
         self.thread_menu_id = Some(id.to_string());
         self.thread_menu_snooze_only = false;
         self.thread_menu_items[ThreadMenuItem::Pin.slot()].focus(window, cx);
@@ -2086,117 +2195,389 @@ impl Workspace {
         }
     }
 
-    fn render_sidebar_nav_icon(
-        &self,
-        view: AppView,
-        icon_path: &'static str,
-        label: &'static str,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        self.sidebar_nav_button(view, icon_path, label, cx)
-            .into_any_element()
+    /// Whether keyboard focus is on one of the Apps popover's items.
+    pub(super) fn sidebar_apps_menu_has_focus(&self, window: &Window) -> bool {
+        self.sidebar_apps_items
+            .iter()
+            .any(|item| item.is_focused(window))
     }
 
-    /// Agent workflows, with the unread update count pinned to its corner
-    /// and in its name, like the web's entry.
-    fn render_agent_workflows_nav(&self, cx: &Context<'_, Self>) -> AnyElement {
-        const LABEL: &str = "Agent workflows";
-        let unread = self.reactive_automations.read(cx).unread_count();
-        self.sidebar_nav_button(AppView::Automations, assets::BOT_ICON_PATH, LABEL, cx)
-            .relative()
-            .aria_label(crate::views::reactive_automations::unread_label(
-                LABEL, unread,
-            ))
-            .when(unread > 0, |el| {
-                el.child(
-                    div()
-                        .debug_selector(|| "desktop-sidebar-agent-workflows-badge".to_string())
-                        .absolute()
-                        .top(px(SIDEBAR_BADGE_OFFSET_PX))
-                        .right(px(SIDEBAR_BADGE_OFFSET_PX))
-                        .h(px(SIDEBAR_BADGE_HEIGHT_PX))
-                        .min_w(px(SIDEBAR_BADGE_HEIGHT_PX))
-                        .px(px(SIDEBAR_BADGE_X_PADDING_PX))
-                        .rounded(px(SIDEBAR_BADGE_HEIGHT_PX / 2.0))
-                        .bg(theme::blueberry_400())
-                        .text_color(theme::longan_950())
-                        .text_size(px(SIDEBAR_BADGE_TEXT_PX))
-                        .line_height(px(SIDEBAR_BADGE_HEIGHT_PX))
-                        .flex()
-                        .justify_center()
-                        .child(if unread > 99 {
-                            "99+".to_string()
-                        } else {
-                            unread.to_string()
-                        }),
-                )
-            })
-            .into_any_element()
+    /// Close the footer Apps popover and return focus to its trigger button.
+    pub(super) fn close_sidebar_apps_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.sidebar_apps_open {
+            self.sidebar_apps_open = false;
+            self.sidebar_apps_trigger_focus.focus(window, cx);
+            cx.notify();
+        }
     }
 
-    fn sidebar_nav_button(
-        &self,
-        view: AppView,
-        icon_path: &'static str,
-        label: &'static str,
-        cx: &Context<'_, Self>,
-    ) -> Stateful<Div> {
-        let active = self.active_view == view && !self.settings_visible();
-        let selector = format!(
-            "desktop-sidebar-nav-{}",
-            label.to_ascii_lowercase().replace(' ', "-")
-        );
+    fn toggle_sidebar_apps_menu(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.sidebar_apps_open {
+            self.close_sidebar_apps_menu(window, cx);
+            return;
+        }
+        self.thread_menu_id = None;
+        self.sidebar_apps_open = true;
+        let focus_slot = SIDEBAR_APP_SPECS
+            .iter()
+            .find(|spec| self.active_view == spec.view() && !self.settings_visible())
+            .map_or(0, |spec| spec.slot);
+        self.sidebar_apps_items[focus_slot].focus(window, cx);
+        cx.notify();
+    }
+
+    fn unread_pill_badge(selector: &'static str, unread: usize) -> Div {
         div()
-            .id(ElementId::Name(selector.clone().into()))
-            .debug_selector(move || selector)
-            .size(px(SIDEBAR_ICON_BUTTON_PX))
-            .flex_shrink_0()
-            .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
+            .debug_selector(move || selector.to_string())
+            .h(px(SIDEBAR_BADGE_HEIGHT_PX))
+            .min_w(px(SIDEBAR_BADGE_HEIGHT_PX))
+            .px(px(SIDEBAR_BADGE_X_PADDING_PX))
+            .rounded(px(SIDEBAR_BADGE_HEIGHT_PX / 2.0))
+            .bg(theme::blueberry_400())
+            .text_color(theme::longan_950())
+            .text_size(px(SIDEBAR_BADGE_TEXT_PX))
+            .font_weight(FontWeight::SEMIBOLD)
+            .line_height(px(SIDEBAR_BADGE_HEIGHT_PX))
             .flex()
             .items_center()
             .justify_center()
-            .text_color(if active {
-                theme::rambutan_100()
+            .flex_shrink_0()
+            .child(if unread > 99 {
+                "99+".to_string()
             } else {
-                theme::rambutan_500()
+                unread.to_string()
             })
-            .when(active, |el| {
-                el.bg(theme::longan_800().opacity(ACTIVE_BG_OPACITY_60))
-            })
-            .when(!active, |el| {
-                el.hover(|el| {
-                    el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40))
-                        .text_color(theme::rambutan_100())
-                })
-            })
+    }
+
+    fn render_sidebar_apps_group_header(title: &'static str) -> AnyElement {
+        div()
+            .px(px(THREAD_MENU_ROW_X_PADDING_PX))
+            .pt(px(4.0))
+            .pb(px(3.0))
+            .text_size(px(SIDEBAR_APPS_GROUP_TEXT_PX))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::rambutan_500())
+            .child(title)
+            .into_any_element()
+    }
+
+    fn render_sidebar_app_menu_row(
+        &self,
+        spec: SidebarAppSpec,
+        unread: usize,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let view = spec.view();
+        let active = self.active_view == view && !self.settings_visible();
+        let focus = self.sidebar_apps_items[spec.slot].clone();
+        let aria_label: SharedString = if spec.is_automations() {
+            crate::views::reactive_automations::unread_label(spec.label, unread).into()
+        } else {
+            spec.label.into()
+        };
+        let run =
+            move |this: &mut Workspace, window: &mut Window, cx: &mut Context<'_, Workspace>| {
+                this.sidebar_apps_open = false;
+                this.activate_sidebar_view(spec.view(), window, cx);
+            };
+        let run_for_key = run;
+        div()
+            .id(ElementId::Name(spec.selector.into()))
+            .debug_selector(move || spec.selector.to_string())
+            .track_focus(&focus)
             .tab_index(0)
-            .role(Role::Tab)
-            .aria_label(label)
+            .role(Role::MenuItem)
+            .aria_label(aria_label)
             .aria_selected(active)
+            .h(px(SIDEBAR_APPS_ROW_PX))
+            .w_full()
+            .px(px(THREAD_MENU_ROW_X_PADDING_PX))
+            .rounded(px(SIDEBAR_RADIUS_SEED_PX))
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(8.0))
             .cursor_pointer()
-            .map(|el| {
-                on_press_view(el, cx, move |this, window, cx| {
-                    this.activate_sidebar_view(view.clone(), window, cx);
-                })
+            .when(active, |el| el.bg(theme::longan_800().opacity(0.75)))
+            .when(!active, |el| {
+                el.hover(|el| el.bg(theme::longan_800().opacity(0.55)))
             })
-            .child(icon(
-                icon_path,
-                SIDEBAR_ICON_PX,
-                if active {
-                    theme::rambutan_100()
-                } else {
-                    theme::rambutan_500()
-                },
-            ))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                cx.stop_propagation();
+                if !event.is_keyboard() {
+                    run(this, window, cx);
+                }
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    run_for_key(this, window, cx);
+                }
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .min_w_0()
+                    .flex_1()
+                    .child(icon(
+                        spec.icon_path,
+                        SIDEBAR_ICON_PX,
+                        if active {
+                            theme::rambutan_100()
+                        } else {
+                            theme::rambutan_400()
+                        },
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .when(active, |el| el.font_weight(FontWeight::MEDIUM))
+                            .text_color(if active {
+                                theme::rambutan_100()
+                            } else {
+                                theme::rambutan_200()
+                            })
+                            .child(spec.label),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .flex_shrink_0()
+                    .when(spec.is_automations() && unread > 0, |el| {
+                        el.child(Self::unread_pill_badge(
+                            "desktop-sidebar-agent-workflows-badge",
+                            unread,
+                        ))
+                    })
+                    .when(active, |el| {
+                        el.child(icon(
+                            assets::CHECK_ICON_PATH,
+                            SIDEBAR_APPS_CHECK_PX,
+                            theme::persimmon_400(),
+                        ))
+                    }),
+            )
+            .into_any_element()
     }
 
-    /// Footer view switcher, like the web's: the views in rows of six, then
-    /// settings in the last row's last column.
+    /// Floating grouped view-switcher popover anchored above the footer `Apps` trigger.
+    fn render_sidebar_apps_menu(&self, unread: usize, cx: &Context<'_, Self>) -> AnyElement {
+        let mut rows: Vec<AnyElement> = Vec::with_capacity(SIDEBAR_APP_SPECS.len() + 3);
+        rows.push(Self::render_sidebar_apps_group_header("WORKSPACE"));
+        for spec in SIDEBAR_APP_SPECS
+            .iter()
+            .copied()
+            .filter(|spec| spec.group == SidebarAppGroup::Workspace)
+        {
+            rows.push(self.render_sidebar_app_menu_row(spec, unread, cx));
+        }
+        rows.push(thread_menu_separator());
+        rows.push(Self::render_sidebar_apps_group_header("TOOLS & AGENTS"));
+        for spec in SIDEBAR_APP_SPECS
+            .iter()
+            .copied()
+            .filter(|spec| spec.group == SidebarAppGroup::ToolsAndAgents)
+        {
+            rows.push(self.render_sidebar_app_menu_row(spec, unread, cx));
+        }
+        div()
+            .id("desktop-sidebar-apps-menu")
+            .debug_selector(|| "desktop-sidebar-apps-menu".to_string())
+            .key_context("SidebarAppsMenu")
+            .w(px(SIDEBAR_APPS_MENU_WIDTH_PX))
+            .p(px(6.0))
+            .rounded(px(8.0))
+            .bg(theme::longan_700())
+            .border_1()
+            .border_color(theme::ring_floating())
+            .shadow_md()
+            .occlude()
+            .flex()
+            .flex_col()
+            .gap(px(1.0))
+            .role(Role::Menu)
+            .aria_label("Apps")
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let modifiers = event.keystroke.modifiers;
+                if modifiers.platform || modifiers.control || modifiers.alt || modifiers.function {
+                    return;
+                }
+                if event.keystroke.key == "tab" {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.close_sidebar_apps_menu(window, cx);
+                    return;
+                }
+                let current = this
+                    .sidebar_apps_items
+                    .iter()
+                    .position(|item| item.is_focused(window));
+                if let Some(next) = menu_step(
+                    current,
+                    this.sidebar_apps_items.len(),
+                    event.keystroke.key.as_str(),
+                ) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.sidebar_apps_items[next].focus(window, cx);
+                }
+            }))
+            .children(rows)
+            .into_any_element()
+    }
+
+    /// Single-row sidebar footer dock: labeled `Apps` view-switcher popover on
+    /// the left, compact `Usage`, optional update-check, and `Settings` on the
+    /// right.
     fn render_sidebar_footer(&self, show_check: bool, cx: &Context<'_, Self>) -> AnyElement {
+        let unread = self.reactive_automations.read(cx).unread_count();
+        let active_app = (!self.settings_visible())
+            .then(|| {
+                SIDEBAR_APP_SPECS
+                    .iter()
+                    .copied()
+                    .find(|spec| self.active_view == spec.view())
+            })
+            .flatten();
+        let trigger_highlighted = self.sidebar_apps_open || active_app.is_some();
+        let trigger_icon_path =
+            active_app.map_or(assets::LAYOUT_DASHBOARD_ICON_PATH, |spec| spec.icon_path);
+        let trigger_label = active_app.map_or("Apps", |spec| spec.label);
+        let trigger_aria: SharedString = if unread > 0 {
+            crate::views::reactive_automations::unread_label(trigger_label, unread).into()
+        } else if active_app.is_some() {
+            format!("{trigger_label}, switch app").into()
+        } else {
+            "Apps".into()
+        };
+
+        let apps_trigger = on_press_view(
+            div()
+                .id("desktop-sidebar-apps-trigger")
+                .debug_selector(|| "desktop-sidebar-apps-trigger".to_string())
+                .track_focus(&self.sidebar_apps_trigger_focus)
+                .w_full()
+                .h(px(SIDEBAR_ICON_BUTTON_PX))
+                .px(px(8.0))
+                .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
+                .border_1()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(6.0))
+                .cursor_pointer()
+                .tab_index(0)
+                .role(Role::Button)
+                .aria_label(trigger_aria)
+                .when(trigger_highlighted, |el| {
+                    el.bg(theme::longan_800().opacity(ACTIVE_BG_OPACITY_60))
+                        .border_color(theme::longan_700().opacity(0.75))
+                        .text_color(theme::rambutan_100())
+                })
+                .when(!trigger_highlighted, |el| {
+                    el.bg(theme::longan_800().opacity(0.32))
+                        .border_color(theme::longan_800().opacity(0.70))
+                        .text_color(theme::rambutan_200())
+                        .hover(|el| {
+                            el.bg(theme::longan_800().opacity(0.55))
+                                .border_color(theme::longan_700().opacity(0.65))
+                                .text_color(theme::rambutan_100())
+                        })
+                })
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .min_w_0()
+                        .flex_1()
+                        .child(icon(
+                            trigger_icon_path,
+                            SIDEBAR_ICON_PX,
+                            if trigger_highlighted {
+                                theme::rambutan_100()
+                            } else {
+                                theme::rambutan_400()
+                            },
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(SIDEBAR_LABEL_TEXT_PX))
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(trigger_label),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .flex_shrink_0()
+                        .when(unread > 0, |el| {
+                            el.child(Self::unread_pill_badge(
+                                "desktop-sidebar-apps-unread-badge",
+                                unread,
+                            ))
+                        })
+                        .child(icon(
+                            assets::CHEVRON_DOWN_ICON_PATH,
+                            SIDEBAR_APPS_CHEVRON_PX,
+                            if trigger_highlighted {
+                                theme::rambutan_300()
+                            } else {
+                                theme::rambutan_500()
+                            },
+                        )),
+                ),
+            cx,
+            |this, window, cx| {
+                this.toggle_sidebar_apps_menu(window, cx);
+            },
+        );
+
+        let apps_slot = div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .child(apps_trigger)
+            .when(self.sidebar_apps_open, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w_full()
+                        .h(px(SIDEBAR_ICON_BUTTON_PX))
+                        .child(menu_popover::menu_popover(
+                            size(px(SIDEBAR_APPS_MENU_WIDTH_PX), px(SIDEBAR_ICON_BUTTON_PX)),
+                            self.render_sidebar_apps_menu(unread, cx),
+                        )),
+                )
+            });
+
         let settings_active = self.settings_visible();
+        let settings_label = self.ui_language().text("Settings");
         let settings = div()
             .id("desktop-sidebar-nav-settings")
             .debug_selector(|| "desktop-sidebar-nav-settings".to_string())
@@ -2222,11 +2603,14 @@ impl Workspace {
             })
             .tab_index(0)
             .role(Role::Tab)
-            .aria_label(self.ui_language().text("Settings"))
+            .aria_label(settings_label)
             .aria_selected(settings_active)
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .tooltip(move |window, cx| {
+                bruhs_ui::tooltip::Tooltip::new(settings_label).build(window, cx)
+            })
             .cursor_pointer()
             .map(|el| {
                 on_press_view(el, cx, |this, window, cx| {
@@ -2271,72 +2655,31 @@ impl Workspace {
                 this.open_usage_dashboard(window, cx);
             },
         );
-        let mut cells = vec![
-            self.render_sidebar_nav_icon(AppView::Today, assets::SUN_ICON_PATH, "Today", cx),
-            self.render_sidebar_nav_icon(AppView::Inbox, assets::INBOX_ICON_PATH, "Inbox", cx),
-            self.render_sidebar_nav_icon(
-                AppView::Knowledge,
-                assets::BOOK_OPEN_ICON_PATH,
-                "Knowledge",
-                cx,
-            ),
-            self.render_sidebar_nav_icon(
-                AppView::Tasks,
-                assets::LIST_CHECKS_ICON_PATH,
-                "Tasks",
-                cx,
-            ),
-            self.render_sidebar_nav_icon(
-                AppView::Terminal,
-                assets::TOOL_TERMINAL_ICON_PATH,
-                "Terminal",
-                cx,
-            ),
-            self.render_sidebar_nav_icon(AppView::Workbench, "icons/wrench.svg", "Workbench", cx),
-            self.render_sidebar_nav_icon(AppView::Calendar, "icons/calendar.svg", "Calendar", cx),
-            self.render_sidebar_nav_icon(AppView::Meetings, assets::MIC_ICON_PATH, "Meetings", cx),
-            self.render_sidebar_nav_icon(AppView::People, assets::USERS_ICON_PATH, "People", cx),
-            self.render_agent_workflows_nav(cx),
-            usage.into_any_element(),
-        ];
-        if show_check {
-            cells.push(self.sidebar_check_button(cx));
-        }
-        // Settings takes the last column, under the first row's last view:
-        // empty cells fill the views' last row up to it, and settings starts
-        // a row of its own when the views fill theirs (web `col-start-6`).
-        let free = SIDEBAR_FOOTER_COLUMNS - cells.len() % SIDEBAR_FOOTER_COLUMNS;
-        let empty = (free + SIDEBAR_FOOTER_COLUMNS - 1) % SIDEBAR_FOOTER_COLUMNS;
-        cells.extend((0..empty).map(|_| {
-            div()
-                .size(px(SIDEBAR_ICON_BUTTON_PX))
-                .flex_shrink_0()
-                .into_any_element()
-        }));
-        cells.push(settings.into_any_element());
-        let mut rows = Vec::new();
-        let mut cells = cells.into_iter().peekable();
-        while cells.peek().is_some() {
-            rows.push(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .children(cells.by_ref().take(SIDEBAR_FOOTER_COLUMNS)),
-            );
-        }
+        let utilities = div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .flex_shrink_0()
+            .child(usage)
+            .when(show_check, |el| el.child(self.sidebar_check_button(cx)))
+            .child(settings);
+
         div()
             .id("sidebar-footer")
             .debug_selector(|| "desktop-sidebar-footer".to_string())
             .role(Role::Group)
             .aria_label("Views")
+            .border_t_1()
+            .border_color(theme::longan_800().opacity(0.6))
             .px(px(SIDEBAR_FOOTER_PADDING_PX))
             .py(px(SIDEBAR_FOOTER_PADDING_PX))
             .flex()
-            .flex_col()
-            .gap(px(SIDEBAR_FOOTER_ROW_GAP_PX))
+            .items_center()
+            .justify_between()
+            .gap(px(6.0))
             .flex_shrink_0()
-            .children(rows)
+            .child(apps_slot)
+            .child(utilities)
             .into_any_element()
     }
 

@@ -324,10 +324,11 @@ impl Workspace {
         self.top_layer = Some(top_layer);
     }
 
-    /// A dialog or the command bar takes over: the thread menu (and its
-    /// backdrop) must not stay above it.
+    /// A dialog or the command bar takes over: sidebar menus (and their
+    /// backdrops) must not stay above it.
     fn close_sidebar_menus(&mut self) {
         self.thread_menu_id = None;
+        self.sidebar_apps_open = false;
     }
 
     /// Closes the dialog if `is_open` says it is the one showing.
@@ -546,11 +547,14 @@ impl Workspace {
         }
         let had_overlay = self.overlay_open();
         let thread_menu = self.thread_menu_id.clone();
-        let had_menu = thread_menu.is_some();
+        let had_apps_menu = self.sidebar_apps_open;
+        let had_menu = thread_menu.is_some() || had_apps_menu;
         self.close_transient_surfaces();
         // A menu returns focus to the button that opened it.
         if let Some(id) = thread_menu {
             self.focus_thread_menu_button(&id, window, cx);
+        } else if had_apps_menu {
+            self.sidebar_apps_trigger_focus.focus(window, cx);
         }
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.close_composer_menus(cx));
