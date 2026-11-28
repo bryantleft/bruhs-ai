@@ -89,10 +89,28 @@ describe("changelog.html", () => {
 
 describe("download.html", () => {
   const downloads = readFileSync(new URL("download.html", PUBLIC), "utf8");
+  const downloadScript = readFileSync(new URL("../src/scripts/download.ts", import.meta.url), "utf8");
+  const downloadIds = new Set([...downloads.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
 
   it("offers the three supported package formats with a working offline-metadata fallback", () => {
     const names = [...downloads.matchAll(/data-package="([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(names, ["Bruhs-macOS-arm64.dmg", "Bruhs-Windows-x64-Setup.exe", "Bruhs-Linux-x64.deb"]);
     assert.equal(downloads.match(/href="https:\/\/github.com\/bryantleft\/bruhs-ai\/releases\/latest" data-package-link/g)?.length, names.length);
+  });
+
+  it("renders official OS logos and badges without middle-dot or bullet separators", () => {
+    for (const icon of ["apple", "windows", "linux"]) {
+      const matches = downloads.match(new RegExp(`icon-${icon}`, "g")) ?? [];
+      assert.ok(matches.length >= 2, `expected icon-${icon} in hero CTA and platform card`);
+    }
+    assert.ok((downloads.match(/class="badge\b/g)?.length ?? 0) >= 10, "expected platform and release badges");
+    assert.doesNotMatch(downloads, /[·•]/, "download.html should use badges instead of middle-dot or bullet separators");
+    assert.doesNotMatch(downloadScript, /[·•]/, "download.ts should use badges instead of middle-dot or bullet separators");
+  });
+
+  it("wires the source command Copy button to an existing element", () => {
+    const targets = [...downloads.matchAll(/data-copy="([^"]+)"/g)].map((match) => match[1] ?? "");
+    assert.ok(targets.length > 0);
+    for (const target of targets) assert.ok(downloadIds.has(target), `Copy button points at missing #${target}`);
   });
 });

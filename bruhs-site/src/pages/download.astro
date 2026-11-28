@@ -1,40 +1,137 @@
 ---
 import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
 
 const releases = "https://github.com/bryantleft/bruhs-ai/releases/latest";
+const allReleases = "https://github.com/bryantleft/bruhs-ai/releases";
+const repo = "https://github.com/bryantleft/bruhs-ai";
+
 const packages = [
-  { os: "mac", name: "macOS", requirement: "Apple silicon · macOS 13 or later", file: "Bruhs-macOS-arm64.dmg", format: "DMG" },
-  { os: "windows", name: "Windows", requirement: "x64 · WebView2 and Visual C++ runtimes", file: "Bruhs-Windows-x64-Setup.exe", format: "EXE installer" },
-  { os: "linux", name: "Linux", requirement: "x86_64 · Ubuntu 24.04", file: "Bruhs-Linux-x64.deb", format: "DEB installer" },
+  {
+    os: "mac",
+    icon: "apple" as const,
+    iconSize: 26,
+    name: "macOS",
+    summary: "Native desktop app with microphone and system audio capture.",
+    format: "DMG",
+    badges: ["Apple silicon", "macOS 13+"],
+    file: "Bruhs-macOS-arm64.dmg",
+  },
+  {
+    os: "windows",
+    icon: "windows" as const,
+    iconSize: 24,
+    name: "Windows",
+    summary: "Signed setup installer with Start menu shortcut and uninstaller.",
+    format: "EXE installer",
+    badges: ["x64", "WebView2", "Visual C++"],
+    file: "Bruhs-Windows-x64-Setup.exe",
+  },
+  {
+    os: "linux",
+    icon: "linux" as const,
+    iconSize: 26,
+    name: "Linux",
+    summary: "Debian desktop package with runtime dependencies and launcher.",
+    format: "DEB installer",
+    badges: ["x86_64", "Ubuntu 24.04"],
+    file: "Bruhs-Linux-x64.deb",
+  },
 ];
 ---
-<Base title="Download bruhs" description="Get bruhs for macOS, Windows or Linux. Choose a desktop build and see the latest release." path="/download" current="download">
+<Base
+  title="Download bruhs"
+  description="Get bruhs for macOS, Windows, or Linux. Choose a desktop build and view the latest release."
+  path="/download"
+  current="download"
+  fonts={["Krypton", "Xenon", "Neon", "Argon"]}
+>
   <main class="downloads wrap" id="main" tabindex="-1">
     <header class="downloads-head">
-      <div>
-        <h1 class="display">Download bruhs.</h1>
-        <p class="lede">Your agents, tasks and meetings in one desktop app.</p>
-        <div class="get-row">
-          <a class="btn btn-primary" href="#platforms" id="recommended-download">Choose a platform</a>
-          <a class="btn btn-ghost" href="/changelog">Changelog</a>
+      <div class="downloads-intro">
+        <div class="badges release-meta-badges" id="release-info">
+          <a class="badge badge-current badge-link" id="release-version" href={releases}>Latest release</a>
+          <span class="badge" id="release-date" hidden></span>
+          <span class="badge">MIT License</span>
         </div>
-        <p class="label" id="release-info"><a href={releases}>Latest release on GitHub</a></p>
+        <h1 class="display">Download bruhs.</h1>
+        <p class="lede">Your agents, tasks, and meetings in one local desktop app.</p>
+        <div class="get-row">
+          <a class="btn btn-primary os-cta" href="#platforms" id="recommended-download">
+            <Icon name="apple" />
+            <Icon name="windows" />
+            <Icon name="linux" />
+            <span class="os-mac">Download for macOS</span>
+            <span class="os-windows">Download for Windows</span>
+            <span class="os-linux">Download for Linux</span>
+            <span class="os-intel">Run from source</span>
+            <span class="os-other">Choose a platform</span>
+          </a>
+          <a class="btn btn-quiet" href="/changelog">Changelog</a>
+          <a class="btn btn-ghost" href={allReleases}><Icon name="github" />All releases</a>
+        </div>
+        <p class="intel-note" id="intel-note" hidden>
+          <span class="badge badge-warn">Intel Mac</span>
+          <span>Prebuilt macOS downloads require Apple silicon. Build from source below.</span>
+        </p>
       </div>
       <img class="download-mark" src="/logo.svg" width="160" height="160" alt="" />
     </header>
-    <section id="platforms" aria-labelledby="platform-title">
-      <h2 class="h2" id="platform-title">All downloads</h2>
-      <ul class="packages">
-        {packages.map(({ os, name, requirement, file, format }) => (
-          <li data-platform={os} data-package={file}>
-            <h3 class="h3">{name}</h3>
-            <p>{requirement}</p>
-            <span class="package-format">{format}<span data-size></span></span>
-            <a class="btn btn-quiet" href={releases} data-package-link aria-label={`View release files for ${name}`}>View release files</a>
-          </li>
+
+    <section class="platforms-section" id="platforms" aria-labelledby="platform-title">
+      <div class="section-head">
+        <h2 class="h2" id="platform-title">Desktop installers</h2>
+        <p class="muted">Every installer includes the desktop app, local server, and capture helper.</p>
+      </div>
+      <div class="platform-grid">
+        {packages.map(({ os, icon, iconSize, name, summary, format, badges, file }) => (
+          <article class="platform-card" data-platform={os} data-package={file}>
+            <div class="platform-top">
+              <div class="os-mark" aria-hidden="true">
+                <Icon name={icon} size={iconSize} />
+              </div>
+              <div class="platform-heading">
+                <h3 class="h3">{name}</h3>
+                <span class="badge badge-current detected-badge">Your OS</span>
+              </div>
+            </div>
+            <p class="platform-summary">{summary}</p>
+            <div class="badges platform-badges" aria-label={`${name} format and requirements`}>
+              <span class="badge badge-format">{format}</span>
+              {badges.map((item) => <span class="badge">{item}</span>)}
+              <span class="badge badge-size" data-size hidden></span>
+            </div>
+            <div class="platform-footer">
+              <a class="btn btn-quiet card-cta" href={releases} data-package-link aria-label={`View release files for ${name}`}>View release files</a>
+              <span class="package-file">{file}</span>
+            </div>
+          </article>
         ))}
-      </ul>
-      <p class="label">Using a different system? <a href="/#source">Run bruhs from source</a>.</p>
+      </div>
+    </section>
+
+    <section class="source-panel" id="source" aria-labelledby="source-title">
+      <div class="source-head">
+        <div class="source-copy">
+          <h2 class="h3" id="source-title">Run from source</h2>
+          <p class="muted">Using Intel macOS, another Linux distribution, or tracking main? Build bruhs locally.</p>
+        </div>
+        <div class="badges source-badges">
+          <span class="badge">Rust</span>
+          <span class="badge">Intel macOS</span>
+          <span class="badge">Other Linux</span>
+        </div>
+      </div>
+      <div class="source-row">
+        <p class="source" id="download-source-command" tabindex="0" aria-label="Run it from source"><span class="p" aria-hidden="true">$</span> <code>git clone https://github.com/bryantleft/bruhs-ai &amp;&amp; cd bruhs-ai &amp;&amp; scripts/dev.sh</code></p>
+        <button class="btn btn-quiet copy" type="button" data-copy="download-source-command">Copy</button>
+      </div>
+      <p class="action-status" data-copy-status role="status"></p>
+      <div class="get-row">
+        <a class="btn btn-ghost" href={repo}><Icon name="github" />Browse on GitHub</a>
+        <a class="btn btn-ghost" href="/privacy">Privacy</a>
+        <a class="btn btn-ghost" href="/#faq">Questions</a>
+      </div>
     </section>
   </main>
 </Base>
@@ -44,23 +141,190 @@ const packages = [
 </script>
 
 <style>
-  .downloads { padding-block: clamp(3rem, 8vw, 7rem); }
-  .downloads-head { display: flex; align-items: center; justify-content: space-between; gap: 2rem; margin-bottom: clamp(3rem, 7vw, 6rem); }
-  .downloads-head .lede { margin: 1rem 0 1.6rem; }
-  .download-mark { width: clamp(6rem, 17vw, 12rem); height: auto; }
-  .packages { padding: 0; margin: 1.4rem 0; list-style: none; border-top: 1px dotted var(--longan-700); }
-  .packages li { display: grid; grid-template-columns: 1fr 2.8fr 1.2fr minmax(11rem, auto); align-items: center; gap: 1rem; padding: 1.3rem 0; border-bottom: 1px dotted var(--longan-700); }
-  .packages p { margin: 0; color: var(--rambutan-400); font-size: .9rem; }
-  .package-format { font: .8125rem/1.5 var(--argon); color: var(--rambutan-300); }
-  .packages li > :last-child { justify-self: end; }
-  @media (max-width: 780px) {
-    .packages li { grid-template-columns: 1fr auto; gap: .45rem 1rem; }
-    .packages p { grid-row: 2; }
-    .package-format { grid-row: 3; }
-    .packages li > :last-child { grid-column: 2; grid-row: 1 / 4; }
-    .download-mark { display: none; }
+  .downloads { padding-block: clamp(2.5rem, 7vw, 5.5rem); }
+
+  .downloads-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    margin-bottom: clamp(2.5rem, 6vw, 4.5rem);
   }
-  @media (max-width: 410px) {
-    .packages li > :last-child { grid-column: 1 / -1; grid-row: auto; justify-self: start; margin-top: .4rem; }
+  .downloads-intro { display: grid; gap: 1rem; max-width: 42rem; min-width: 0; }
+  .downloads-head .lede { margin: 0; }
+  .downloads-head .get-row { margin-top: .25rem; }
+  .download-mark { width: clamp(6rem, 15vw, 10.5rem); height: auto; flex: none; }
+
+  .release-meta-badges { margin: 0; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .badge[hidden] { display: none; }
+  .badge-link { text-decoration: none; transition: background-color var(--quick) var(--ease), color var(--quick) var(--ease), box-shadow var(--quick) var(--ease); }
+  .badge-link:hover { color: var(--rambutan-100); box-shadow: inset 0 0 0 1px var(--pandan-300); }
+  .badge-format { color: var(--rambutan-200); background: var(--longan-800); box-shadow: inset 0 0 0 1px var(--ring-10); }
+  .badge-size { color: var(--rambutan-300); }
+  .badge-warn { color: var(--durian-300); background: var(--durian-950); box-shadow: none; }
+
+  .intel-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    margin: .25rem 0 0;
+    font-size: .875rem;
+    color: var(--rambutan-400);
+  }
+  .intel-note[hidden] { display: none; }
+
+  /* Show only the visitor's OS icon and label in the primary CTA before JS runs. */
+  .os-cta :global(.icon),
+  .os-cta .os-mac,
+  .os-cta .os-windows,
+  .os-cta .os-linux,
+  .os-cta .os-intel { display: none; }
+
+  :global(html[data-os="mac"]:not([data-chip="intel"])) .os-cta :global(.icon-apple),
+  :global(html[data-os="mac"]:not([data-chip="intel"])) .os-cta .os-mac,
+  :global(html[data-os="windows"]) .os-cta :global(.icon-windows),
+  :global(html[data-os="windows"]) .os-cta .os-windows,
+  :global(html[data-os="linux"]) .os-cta :global(.icon-linux),
+  :global(html[data-os="linux"]) .os-cta .os-linux,
+  :global(html[data-os="mac"][data-chip="intel"]) .os-cta .os-intel { display: inline; }
+
+  :global(html[data-os="mac"]) .os-cta .os-other,
+  :global(html[data-os="windows"]) .os-cta .os-other,
+  :global(html[data-os="linux"]) .os-cta .os-other { display: none; }
+
+  .platforms-section {
+    padding-top: clamp(2rem, 5vw, 3.5rem);
+    background: radial-gradient(circle, var(--longan-700) 1px, transparent 1.5px) 0 0 / 7px 7px repeat-x;
+  }
+  .section-head { display: grid; gap: .5rem; margin-bottom: 1.5rem; }
+  .section-head p { margin: 0; font-size: .9375rem; }
+
+  .platform-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .platform-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    background: var(--longan-900);
+    border-radius: var(--lychee);
+    box-shadow: inset 0 0 0 1px var(--ring-10);
+    min-width: 0;
+  }
+
+  .detected-badge { display: none; }
+
+  :global(html[data-os="mac"]:not([data-chip="intel"])) .platform-card[data-platform="mac"],
+  :global(html[data-os="windows"]) .platform-card[data-platform="windows"],
+  :global(html[data-os="linux"]) .platform-card[data-platform="linux"] {
+    box-shadow: inset 0 0 0 1px var(--persimmon-500);
+  }
+  :global(html[data-os="mac"]:not([data-chip="intel"])) .platform-card[data-platform="mac"] .os-mark,
+  :global(html[data-os="windows"]) .platform-card[data-platform="windows"] .os-mark,
+  :global(html[data-os="linux"]) .platform-card[data-platform="linux"] .os-mark {
+    background: var(--longan-800);
+    color: var(--rambutan-100);
+    box-shadow: inset 0 0 0 1px var(--ring-15);
+  }
+  :global(html[data-os="mac"]:not([data-chip="intel"])) .platform-card[data-platform="mac"] .detected-badge,
+  :global(html[data-os="windows"]) .platform-card[data-platform="windows"] .detected-badge,
+  :global(html[data-os="linux"]) .platform-card[data-platform="linux"] .detected-badge {
+    display: inline-flex;
+  }
+
+  .platform-top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .os-mark {
+    width: 48px;
+    height: 48px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: var(--grape);
+    background: var(--longan-800);
+    color: var(--rambutan-200);
+    box-shadow: inset 0 0 0 1px var(--ring-10);
+  }
+  .os-mark :global(.icon) { --icon-lift: 0; }
+
+  .platform-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .platform-summary {
+    margin: 0;
+    color: var(--rambutan-400);
+    font-size: .875rem;
+    line-height: 1.55;
+  }
+
+  .platform-badges { margin: 0; }
+
+  .platform-footer {
+    margin-top: auto;
+    padding-top: 8px;
+    display: grid;
+    gap: 10px;
+  }
+  .platform-footer :global(.badge) { justify-self: start; display: inline-flex; align-items: center; }
+  .card-cta { width: 100%; }
+  .package-file {
+    font: 400 .75rem/1.4 var(--neon);
+    color: var(--rambutan-500);
+    overflow-wrap: anywhere;
+  }
+
+  .source-panel {
+    margin-top: 24px;
+    padding: 24px;
+    background: var(--longan-900);
+    border-radius: var(--lychee);
+    box-shadow: inset 0 0 0 1px var(--ring-10);
+    display: grid;
+    gap: 16px;
+  }
+  .source-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .source-copy { display: grid; gap: 6px; max-width: 58ch; }
+  .source-copy p { margin: 0; font-size: .9rem; }
+  .source-badges { margin: 0; }
+  .source-panel .source-row { width: 100%; }
+  .source-panel .source { background: var(--longan-950); box-shadow: inset 0 0 0 1px var(--ring-10); }
+  .source-panel .action-status { margin: -6px 0 0; font-size: .875rem; color: var(--rambutan-400); }
+
+  @media (max-width: 900px) {
+    .platform-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .download-mark { display: none; }
+    .downloads-head { margin-bottom: 2.25rem; }
+  }
+  @media (max-width: 560px) {
+    .platform-card, .source-panel { padding: 20px; }
+    .source-row { flex-direction: column; }
+    .copy { width: 100%; }
   }
 </style>
